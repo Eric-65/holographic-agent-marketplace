@@ -9,7 +9,7 @@ A policy-controlled marketplace for private financial agents on Starknet.
 
 ---
 
-## Current status (after Prompt 14)
+## Current status
 
 | Layer | Status | Notes |
 |-------|--------|-------|
