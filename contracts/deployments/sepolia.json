@@ -1,0 +1,55 @@
+{
+  "network": "sepolia",
+  "chainId": "0x534e5f5345504f4c4941",
+  "chainName": "Starknet Sepolia",
+  "rpcUrl": "https://starknet-sepolia.public.blastapi.io/rpc/v0_8",
+  "contracts": {
+    "agent_registry": {
+      "address": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "classHash": "0x0",
+      "deployed": false,
+      "version": "1.0.0",
+      "source": "contracts/src/agent_registry.cairo",
+      "status": "TESTNET",
+      "deployedAt": null,
+      "deploymentTx": null
+    },
+    "policy_commitment": {
+      "address": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "classHash": "0x0",
+      "deployed": false,
+      "version": "1.0.0",
+      "source": "contracts/src/policy_commitment.cairo",
+      "status": "TESTNET",
+      "deployedAt": null,
+      "deploymentTx": null
+    },
+    "execution_attestor": {
+      "address": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "classHash": "0x0",
+      "deployed": false,
+      "version": "1.0.0",
+      "source": "contracts/src/execution_attestor.cairo",
+      "status": "TESTNET",
+      "deployedAt": null,
+      "deploymentTx": null
+    },
+    "holographic_anonymizer": {
+      "address": null,
+      "classHash": null,
+      "deployed": false,
+      "version": "0.1.0",
+      "source": "contracts/src/holographic_anonymizer.cairo",
+      "status": "PHASE_2",
+      "note": "NOT DEPLOYED — phase 2, STRK20 is privacy layer, keep isolated",
+      "deployedAt": null,
+      "deploymentTx": null
+    }
+  },
+  "deployer": {
+    "address": null,
+    "note": "Deployer is the connected wallet — no backend private keys"
+  },
+  "explorerBase": "https://sepolia.voyager.online",
+  "notes": "Single source of truth for contract addresses. Frontend/backend read from this file via src/lib/contracts/config.ts. Do not duplicate addresses."
+}
