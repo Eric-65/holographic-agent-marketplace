@@ -22,3 +22,9 @@ pnpm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Installed skills — machine-local symlinks with absolute host paths, not
+# portable across clones. skills-lock.json is committed; regenerate with
+# `npx skills add welttowelt/strk20-skills`.
+.agents/
+.claude/skills/
