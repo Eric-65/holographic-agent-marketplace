@@ -88,10 +88,10 @@ export const CAPABILITIES = {
     riskWeight: 2,
     requiresPrivacy: false,
   },
-  BUDGETS: {
-    id: "BUDGETS",
-    label: "Budgets",
-    description: "Period-scoped spending ceilings enforced alongside the policy engine, never in place of it",
+  BUDGET_MANAGEMENT: {
+    id: "BUDGET_MANAGEMENT",
+    label: "Budget Management",
+    description: "Period-scoped spending ceilings enforced alongside the policy engine, never in place of it — multiple applicable budgets can all apply at once",
     riskWeight: 1,
     requiresPrivacy: false,
   },
@@ -107,6 +107,20 @@ export const CAPABILITIES = {
     label: "Workflow Participation",
     description: "Participates as one step in a multi-agent workflow, gated by policy/compliance steps ahead of any execution step",
     riskWeight: 1,
+    requiresPrivacy: false,
+  },
+  PAYMENT_REQUESTS: {
+    id: "PAYMENT_REQUESTS",
+    label: "Payment Requests",
+    description: "Prepares reusable payment requests for an approved recipient — the sender's policy still decides on approval, a request can never self-authorize",
+    riskWeight: 1,
+    requiresPrivacy: false,
+  },
+  COMPLIANCE_REVIEW: {
+    id: "COMPLIANCE_REVIEW",
+    label: "Compliance Review",
+    description: "Evaluates policy/execution evidence and prepares audit requests and verification summaries — read-only over compliance data, no execution authority",
+    riskWeight: 0,
     requiresPrivacy: false,
   },
 } as const;

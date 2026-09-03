@@ -11,7 +11,9 @@ import TreasuryTransferForm from "../../components/TreasuryTransferForm";
 import RecipientManager from "../../components/RecipientManager";
 import DiagnosticPanel from "../../components/DiagnosticPanel";
 import TreasuryTabs from "../../components/treasury/TreasuryTabs";
+import NewRecipientReviewPanel from "../../components/treasury/NewRecipientReviewPanel";
 import { formatMinor } from "../../components/treasury/ExecutionRequestCard";
+import { Link } from "../router";
 import { Badge, Button, Panel, PanelHeader, SectionTitle, Stat } from "../../components/ui/primitives";
 
 export default function TreasuryPage() {
@@ -86,9 +88,14 @@ export default function TreasuryPage() {
                 </Button>
               </div>
             )}
+            <Link href="/settings/automation" className="text-[11px] shrink-0" style={{ color: "var(--accent-3)" }}>
+              Emergency controls →
+            </Link>
           </div>
         </Panel>
       )}
+
+      <NewRecipientReviewPanel />
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <Stat label="Total value" value={masked ? "••••" : usd(t.total, { compact: true })} sub="public + shielded" />

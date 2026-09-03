@@ -18,9 +18,11 @@ import DeploymentWizard from "../../../components/DeploymentWizard";
 
 const TREASURY_AUTOMATION_CAPS = [
   { id: "SCHEDULED_PAYMENTS", label: "Scheduled payments" },
-  { id: "BUDGETS", label: "Budgets" },
+  { id: "BUDGET_MANAGEMENT", label: "Budget management" },
   { id: "BATCH_PAYMENTS", label: "Batch payments" },
   { id: "WORKFLOW_PARTICIPATION", label: "Workflow participation" },
+  { id: "PAYMENT_REQUESTS", label: "Payment requests" },
+  { id: "COMPLIANCE_REVIEW", label: "Compliance review" },
 ];
 
 export default function AgentDetailPage() {

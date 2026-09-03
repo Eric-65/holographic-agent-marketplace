@@ -3,11 +3,13 @@ import type { DbPaymentBatch, DbBatchItem } from "../db/schema";
 import { getDeploymentById } from "./deployments";
 import { getActivePolicyByDeployment } from "./policies";
 import { createExecutionRequest, computeSpentToday } from "./executions";
-import { recordBudgetUsage, usedInCurrentPeriod } from "./budgets";
-import { checkBudget } from "../treasury/budget";
+import { recordBudgetsUsage, usedInCurrentPeriod } from "./budgets";
+import { checkBudgets } from "../treasury/budget";
 import { getAutomationControl } from "./automation";
+import { flagNewRecipientReview } from "./newRecipientReviews";
 import { intentToAgentAction } from "../execution/privateTransfer";
 import { validateAction } from "../policy/validateAction";
+import { REASON } from "../policy/model";
 import { makeTransferIntent } from "../intent/model";
 import { poseidonish } from "../hash";
 import type { Hex } from "../types";
@@ -34,7 +36,14 @@ export interface BatchReviewSummary {
  * user authorizes individually through the wallet, exactly like a single
  * transfer. No custom multi-payment protocol is introduced.
  */
-export function createBatch(userId: string, agentDeploymentId: string, name: string, items: BatchItemInput[], budgetId?: string): DbPaymentBatch {
+export function createBatch(
+  userId: string,
+  agentDeploymentId: string,
+  name: string,
+  items: BatchItemInput[],
+  budgetIds: string[] = [],
+  mode: DbPaymentBatch["mode"] = "INDEPENDENT",
+): DbPaymentBatch {
   if (!db.isAvailable()) throw new Error("Backend unavailable");
   if (items.length === 0) throw new Error("Batch must contain at least one payment");
 
@@ -55,7 +64,8 @@ export function createBatch(userId: string, agentDeploymentId: string, name: str
   const batch = db.create<DbPaymentBatch>("payment_batches", {
     userId,
     agentDeploymentId,
-    budgetId,
+    budgetIds,
+    mode,
     name: name || "Payment batch",
     items: [],
     status: "DRAFT",
@@ -63,7 +73,7 @@ export function createBatch(userId: string, agentDeploymentId: string, name: str
   });
 
   const spentByAsset = new Map<string, number>();
-  let budgetUsedSoFar: number | undefined;
+  const budgetReservedInBatch = new Map<string, number>();
 
   const resolvedItems: DbBatchItem[] = items.map((input, idx) => {
     const itemId = `${batch.id}_item_${idx}`;
@@ -87,19 +97,15 @@ export function createBatch(userId: string, agentDeploymentId: string, name: str
     const verdict = validateAction(intentToAgentAction(intent, priorSpent), policy.doc);
     spentByAsset.set(input.asset, priorSpent + input.amount);
 
-    let budgetOk = true;
-    let budgetReason: string | undefined;
-    if (budgetId) {
-      const projectedUsed = budgetUsedSoFar ?? 0;
-      const cumulativeCheck = evaluateBudgetCumulative(budgetId, projectedUsed, input.amount);
-      budgetOk = cumulativeCheck.allowed;
-      budgetReason = cumulativeCheck.reason;
-      budgetUsedSoFar = projectedUsed + (budgetOk ? input.amount : 0);
+    if (verdict.reasons.some((r) => r.includes(REASON.RECIPIENT_NOT_APPROVED))) {
+      flagNewRecipientReview(userId, policy.id, input.recipient, input.asset, "batch_item", itemId);
     }
 
-    if (!verdict.allowed || !budgetOk) {
-      const reasons = [...verdict.reasons];
-      if (!budgetOk && budgetReason) reasons.push(`E_BUDGET_EXCEEDED: ${budgetReason}`);
+    const budgetCheck = evaluateBudgetsCumulative(budgetIds, budgetReservedInBatch, input.amount);
+    for (const id of budgetIds) budgetReservedInBatch.set(id, (budgetReservedInBatch.get(id) ?? 0) + (budgetCheck.allowed ? input.amount : 0));
+
+    if (!verdict.allowed || !budgetCheck.allowed) {
+      const reasons = [...verdict.reasons, ...budgetCheck.reasons.map((r) => `E_BUDGET_EXCEEDED: ${r}`)];
       return { id: itemId, ...input, status: "BLOCKED", blockedReason: reasons.join("; "), requiresHumanApproval: false };
     }
 
@@ -114,8 +120,8 @@ export function createBatch(userId: string, agentDeploymentId: string, name: str
       evaluatedAt: Date.now(),
     });
 
-    if (budgetId && !verdict.requiresHumanApproval) {
-      recordBudgetUsage(budgetId, userId, input.amount, req.id);
+    if (budgetIds.length > 0 && !verdict.requiresHumanApproval) {
+      recordBudgetsUsage(budgetIds, userId, input.amount, req.id);
     }
 
     return {
@@ -127,15 +133,20 @@ export function createBatch(userId: string, agentDeploymentId: string, name: str
     };
   });
 
-  return db.update<DbPaymentBatch>("payment_batches", batch.id, { items: resolvedItems, status: "REVIEWED", reviewedAt: Date.now() })!;
+  const hasBlocked = resolvedItems.some((i) => i.status === "BLOCKED");
+  const finalItems = mode === "ATOMIC" && hasBlocked ? resolvedItems.map((i) => (i.status === "BLOCKED" ? i : { ...i, status: "BLOCKED" as const, blockedReason: "Cancelled — atomic batch requires every item to pass" })) : resolvedItems;
+  const finalStatus: DbPaymentBatch["status"] = mode === "ATOMIC" && hasBlocked ? "CANCELLED" : "REVIEWED";
+
+  return db.update<DbPaymentBatch>("payment_batches", batch.id, { items: finalItems, status: finalStatus, reviewedAt: Date.now() })!;
 }
 
-/** Checks a candidate amount against a budget's remaining room, accounting for what earlier items in THIS batch already reserved. */
-function evaluateBudgetCumulative(budgetId: string, alreadyReservedInBatch: number, amount: number) {
-  const budget = db.getById<any>("budgets", budgetId);
-  if (!budget) return { allowed: false, reason: "Budget not found" };
-  const persistedUsed = usedInCurrentPeriod(budgetId);
-  return checkBudget(budget, persistedUsed + alreadyReservedInBatch, amount);
+/** Checks a candidate amount against every applicable budget's remaining room, accounting for what earlier items in THIS batch already reserved from each. */
+function evaluateBudgetsCumulative(budgetIds: string[], reservedInBatch: Map<string, number>, amount: number) {
+  const entries = budgetIds
+    .map((id) => db.getById<any>("budgets", id))
+    .filter((b): b is any => !!b)
+    .map((budget) => ({ budget, used: usedInCurrentPeriod(budget.id) + (reservedInBatch.get(budget.id) ?? 0) }));
+  return checkBudgets(entries, amount);
 }
 
 export function getBatchesByUser(userId: string): DbPaymentBatch[] {

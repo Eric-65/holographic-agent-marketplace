@@ -10,14 +10,15 @@ import { ensureUser } from "../api/users";
 import { ensureWallet } from "../api/wallets";
 import { deployAgent } from "../api/deployments";
 import { updatePolicy } from "../api/policies";
-import { createSchedule, evaluateAndFireOccurrence, advanceSchedule, getDueSchedules } from "../api/schedules";
-import { createBudget, evaluateBudget, recordBudgetUsage, usedInCurrentPeriod } from "../api/budgets";
+import { createSchedule, updateSchedule, getScheduleVersions, evaluateAndFireOccurrence, advanceSchedule, getDueSchedules } from "../api/schedules";
+import { createBudget, evaluateBudget, evaluateBudgets, recordBudgetUsage, usedInCurrentPeriod } from "../api/budgets";
 import { createBatch } from "../api/batches";
 import { createWorkflowDefinition, startWorkflowRun, getStepsByRun } from "../api/workflows";
-import { pauseAllAutomation, resumeAutomation } from "../api/automation";
+import { pauseAllAutomation, resumeAutomation, checkEmergencyTriggers, triggerEmergencyStop, getAutomationControl } from "../api/automation";
+import { getNewRecipientReviewsByUser, approveNewRecipientReview } from "../api/newRecipientReviews";
 import { makePolicy } from "../policy/model";
 import { addInterval, isOccurrenceDue, occurrenceKeyFor } from "./schedule";
-import { checkBudget, periodKeyFor } from "./budget";
+import { checkBudget, checkBudgets, periodKeyFor } from "./budget";
 
 const USDC = 1_000_000;
 const VENDOR = "0x0512ff9a34cd7e21b8046f5c3d2a1e0b9c8d7e21f";
@@ -235,7 +236,7 @@ describe("Payment batches", () => {
         { recipient: VENDOR, asset: "USDC", amount: 70 * USDC, reason: "A" },
         { recipient: VENDOR, asset: "USDC", amount: 70 * USDC, reason: "B" },
       ],
-      budget.id,
+      [budget.id],
     );
 
     expect(batch.items[0].status).toBe("APPROVED");
@@ -291,5 +292,154 @@ describe("Multi-agent workflow step gating", () => {
     expect(!!run.executionRequestId).toBe(true);
     const steps = getStepsByRun(run.id);
     expect(steps.find((s) => s.type === "TREASURY_EXECUTION")?.status).toBe("PASSED");
+  });
+});
+
+describe("Multiple simultaneous budgets — every one must independently allow", () => {
+  it("checkBudgets blocks if even one of several budgets would be exceeded", () => {
+    const generous = { name: "Agent budget", status: "ACTIVE", limit: 1000 } as any;
+    const tight = { name: "Treasury budget", status: "ACTIVE", limit: 50 } as any;
+    const result = checkBudgets(
+      [
+        { budget: generous, used: 0 },
+        { budget: tight, used: 0 },
+      ],
+      100,
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.results).toHaveLength(2);
+  });
+
+  it("a scheduled payment is BLOCKED when an agent budget passes but the treasury-wide budget does not", () => {
+    reset();
+    const { user, deployment } = setup({ maximumTransactionAmount: 1000 * USDC });
+    const agentBudget = createBudget(user.id, "Agent budget", "USDC", 1000 * USDC, "MONTHLY", null);
+    const treasuryBudget = createBudget(user.id, "Treasury-wide budget", "USDC", 50 * USDC, "MONTHLY", null);
+
+    const schedule = createSchedule(user.id, deployment.id, {
+      asset: "USDC",
+      recipient: VENDOR,
+      amount: 100 * USDC,
+      reason: "Multi-budget test",
+      frequency: "ONCE",
+      startDate: Date.now(),
+      approvalMode: "AUTOMATIC",
+      budgetIds: [agentBudget.id, treasuryBudget.id],
+    });
+
+    const occurrence = evaluateAndFireOccurrence(schedule, schedule.nextOccurrenceAt);
+    expect(occurrence.status).toBe("BLOCKED");
+
+    const combined = evaluateBudgets([agentBudget.id, treasuryBudget.id], 100 * USDC);
+    expect(combined.allowed).toBe(false);
+    expect(combined.results.find((r) => r.budgetId === agentBudget.id)?.allowed).toBe(true);
+    expect(combined.results.find((r) => r.budgetId === treasuryBudget.id)?.allowed).toBe(false);
+  });
+});
+
+describe("Schedule editing preserves history via versioning", () => {
+  it("updateSchedule snapshots the pre-edit state and bumps the version, without touching past occurrences", () => {
+    reset();
+    const { user, deployment } = setup();
+    const schedule = createSchedule(user.id, deployment.id, {
+      asset: "USDC",
+      recipient: VENDOR,
+      amount: 50 * USDC,
+      reason: "Original terms",
+      frequency: "MONTHLY",
+      startDate: Date.now(),
+      approvalMode: "AUTOMATIC",
+    });
+    expect(schedule.version).toBe(1);
+
+    const occurrence = evaluateAndFireOccurrence(schedule, schedule.nextOccurrenceAt);
+    expect(occurrence.policyVersionUsed).toBe(1);
+
+    const updated = updateSchedule(schedule.id, user.id, { amount: 75 * USDC, reason: "Revised terms" }, "vendor asked for a raise");
+    expect(updated.version).toBe(2);
+    expect(updated.amount).toBe(75 * USDC);
+
+    const history = getScheduleVersions(schedule.id);
+    expect(history).toHaveLength(1);
+    expect(history[0].snapshot.amount).toBe(50 * USDC);
+
+    // The already-fired occurrence's record is untouched by the later edit.
+    const stillOriginal = db.getById<any>("schedule_occurrences", occurrence.id);
+    expect(stillOriginal.policyVersionUsed).toBe(1);
+  });
+});
+
+describe("New-recipient review — an agent can never approve its own recipient", () => {
+  it("flags a review instead of silently allowing or silently blocking forever, and approving unblocks the next attempt", () => {
+    reset();
+    const { user, deployment, policyRecord } = setup({ approvedRecipients: [] });
+    const NEW_VENDOR = "0x0777788899900011122233344455566677788899";
+
+    const schedule = createSchedule(user.id, deployment.id, {
+      asset: "USDC",
+      recipient: NEW_VENDOR,
+      amount: 10 * USDC,
+      reason: "First payment to a new vendor",
+      frequency: "ONCE",
+      startDate: Date.now(),
+      approvalMode: "AUTOMATIC",
+    });
+
+    const occurrence = evaluateAndFireOccurrence(schedule, schedule.nextOccurrenceAt);
+    expect(occurrence.status).toBe("BLOCKED");
+
+    const reviews = getNewRecipientReviewsByUser(user.id);
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].recipient).toBe(NEW_VENDOR);
+    expect(reviews[0].status).toBe("PENDING");
+
+    approveNewRecipientReview(reviews[0].id, user.id, "New Vendor Inc");
+
+    const updatedPolicy = db.getById<any>("policies", policyRecord.id);
+    expect(updatedPolicy.doc.approvedRecipients).toContain(NEW_VENDOR);
+  });
+});
+
+describe("Automatic emergency triggers", () => {
+  it("triggers DAILY_SPEND_EXCEEDED once automated spend crosses the configured ceiling, and blocks the next tick", () => {
+    reset();
+    const { user, deployment } = setup({ maximumTransactionAmount: 10_000 * USDC, dailySpendingLimit: 100_000 * USDC });
+    const control = getAutomationControl(user.id);
+    // Tighten the daily ceiling so a single scheduled payment breaches it.
+    db.update("automation_controls", control.id, { maxDailyTreasurySpend: 5 * USDC });
+
+    const schedule = createSchedule(user.id, deployment.id, {
+      asset: "USDC",
+      recipient: VENDOR,
+      amount: 10 * USDC,
+      reason: "Over the daily automation ceiling",
+      frequency: "ONCE",
+      startDate: Date.now(),
+      approvalMode: "AUTOMATIC",
+    });
+    evaluateAndFireOccurrence(schedule, schedule.nextOccurrenceAt);
+
+    const check = checkEmergencyTriggers(user.id);
+    expect(check.triggered).toBe(true);
+    expect(check.trigger).toBe("DAILY_SPEND_EXCEEDED");
+  });
+
+  it("triggerEmergencyStop pauses automation and is distinguishable from a manual pause", () => {
+    reset();
+    const { user } = setup();
+    triggerEmergencyStop(user.id, "FAILURE_RATE_EXCEEDED", "80% of recent executions failed");
+    const control = getAutomationControl(user.id);
+    expect(control.paused).toBe(true);
+    expect(control.pausedByOwner).toBe(false);
+  });
+
+  it("a manual pause is never silently overwritten by a later automatic trigger", () => {
+    reset();
+    const { user } = setup();
+    pauseAllAutomation(user.id, "owner requested maintenance");
+    triggerEmergencyStop(user.id, "STRK20_PROVIDER_FAILURE", "provider down");
+    const control = getAutomationControl(user.id);
+    expect(control.pausedByOwner).toBe(true);
+    expect(control.pausedReason).toBe("owner requested maintenance");
   });
 });

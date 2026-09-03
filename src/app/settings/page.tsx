@@ -6,6 +6,7 @@ import { ENGINE_VERSION } from "../../lib/policy/engine";
 import { chainLabel } from "../../lib/wallet/useWallet";
 import { short } from "../../lib/hash";
 import PrivacyStatus from "../../components/PrivacyStatus";
+import { Link } from "../router";
 import { Badge, Button, KeyValue, Panel, PanelHeader, SectionTitle } from "../../components/ui/primitives";
 
 export default function SettingsPage() {
@@ -50,6 +51,20 @@ export default function SettingsPage() {
                 }
               />
             </div>
+          </Panel>
+
+          <Panel padded={false}>
+            <PanelHeader
+              title="Treasury automation"
+              sub="Emergency triggers, pause-all, and the new-recipient review queue"
+              right={
+                <Link href="/settings/automation">
+                  <Button variant="outline" size="sm">
+                    Open →
+                  </Button>
+                </Link>
+              }
+            />
           </Panel>
 
           <Panel padded={false}>

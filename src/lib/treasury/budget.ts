@@ -61,3 +61,30 @@ export function checkBudget(budget: DbBudget, used: number, amount: number): Bud
 
   return { allowed: true, remaining: remaining - amount, limit: budget.limit, used };
 }
+
+export interface MultiBudgetCheckResult {
+  allowed: boolean;
+  /** One result per budget, in the order given — no budget can override another; ALL must pass. */
+  results: (BudgetCheckResult & { budgetId: string; budgetName: string })[];
+  reasons: string[];
+}
+
+/**
+ * A transaction can be constrained by several budgets at once (e.g. an
+ * agent's own budget AND the monthly treasury budget). Every one of them
+ * must independently allow the amount — the first one that says no blocks
+ * the whole thing, but every budget is still evaluated so all reasons are
+ * visible together.
+ */
+export function checkBudgets(entries: { budget: DbBudget; used: number }[], amount: number): MultiBudgetCheckResult {
+  const results = entries.map(({ budget, used }) => ({ ...checkBudget(budget, used, amount), budgetId: budget.id, budgetName: budget.name }));
+  const reasons = results.filter((r) => !r.allowed).map((r) => r.reason!).filter(Boolean);
+  return { allowed: results.every((r) => r.allowed), results, reasons };
+}
+
+/** Merges the deprecated singular `budgetId` with the current `budgetIds` array into one de-duplicated list. */
+export function resolveBudgetIds(source: { budgetId?: string; budgetIds?: string[] }): string[] {
+  const ids = new Set(source.budgetIds ?? []);
+  if (source.budgetId) ids.add(source.budgetId);
+  return [...ids];
+}

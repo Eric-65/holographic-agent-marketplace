@@ -30,7 +30,7 @@ export default function WorkflowsPage() {
   const [asset, setAsset] = useState("USDC");
   const [amount, setAmount] = useState("100");
   const [reason, setReason] = useState("Vendor invoice #1042");
-  const [budgetId, setBudgetId] = useState("");
+  const [budgetIds, setBudgetIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -46,7 +46,7 @@ export default function WorkflowsPage() {
     try {
       let workflowId = def?.id;
       if (!workflowId) workflowId = createVendorWorkflow("Vendor Payment Workflow").id;
-      startVendorWorkflowRun(workflowId, deployment.id, { recipient, asset, amount: Math.round(Number(amount) * USDC), reason }, budgetId || undefined);
+      startVendorWorkflowRun(workflowId, deployment.id, { recipient, asset, amount: Math.round(Number(amount) * USDC), reason }, budgetIds);
       setShowForm(false);
       setRecipient("");
     } catch (e: any) {
@@ -112,18 +112,33 @@ export default function WorkflowsPage() {
               <label className="text-[11px] faint uppercase tracking-wider">Reason</label>
               <input value={reason} onChange={(e) => setReason(e.target.value)} className="mt-1 w-full h-9 px-3 rounded-lg surface text-[13px] outline-none" />
             </div>
-            <div>
-              <label className="text-[11px] faint uppercase tracking-wider">Budget (optional)</label>
-              <select value={budgetId} onChange={(e) => setBudgetId(e.target.value)} className="mt-1 w-full h-9 px-3 rounded-lg surface text-[13px] outline-none">
-                <option value="">None</option>
-                {budgets.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
+
+          {budgets.length > 0 && (
+            <div className="mt-4">
+              <label className="text-[11px] faint uppercase tracking-wider">Applicable budgets — every one checked must allow this payment</label>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {budgets.map((b) => {
+                  const on = budgetIds.includes(b.id);
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => setBudgetIds((ids) => (on ? ids.filter((id) => id !== b.id) : [...ids, b.id]))}
+                      className="px-2.5 py-1 rounded-full text-[11px] transition-colors"
+                      style={{
+                        border: `1px solid ${on ? "var(--accent-3)" : "var(--border)"}`,
+                        color: on ? "var(--accent-3)" : "var(--text-dim)",
+                        background: on ? "color-mix(in oklab, var(--accent-3) 12%, transparent)" : "transparent",
+                      }}
+                    >
+                      {b.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {error && <div className="text-[11.5px] mt-3" style={{ color: "var(--bad)" }}>{error}</div>}
           <Button variant="primary" size="sm" className="mt-4" onClick={handleStart} disabled={!recipient || !amount}>
             Start run
@@ -158,10 +173,12 @@ export default function WorkflowsPage() {
                     <div className="px-4 pb-4 space-y-3">
                       <div className="space-y-1.5">
                         {steps.map((step) => (
-                          <div key={step.id} className="flex items-center gap-2.5 text-[12px]">
-                            <StepDot status={step.status} />
-                            <span className="w-[150px] shrink-0 faint">{WORKFLOW_STEP_LABEL[step.type]}</span>
-                            <span className="mono text-[11px]" style={{ color: step.status === "FAILED" ? "var(--bad)" : undefined }}>
+                          <div key={step.id} className="flex flex-wrap items-start gap-x-2.5 gap-y-0.5 text-[12px]">
+                            <div className="flex items-center gap-2.5 w-full sm:w-[150px] shrink-0">
+                              <StepDot status={step.status} />
+                              <span className="faint">{WORKFLOW_STEP_LABEL[step.type]}</span>
+                            </div>
+                            <span className="mono text-[11px] min-w-0 break-words pl-[17px] sm:pl-0" style={{ color: step.status === "FAILED" ? "var(--bad)" : undefined }}>
                               {step.detail}
                             </span>
                           </div>

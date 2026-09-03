@@ -10,6 +10,8 @@ import SchedulesPage from "./app/treasury/schedules/page";
 import BudgetsPage from "./app/treasury/budgets/page";
 import PaymentsPage from "./app/treasury/payments/page";
 import WorkflowsPage from "./app/treasury/workflows/page";
+import PaymentRequestsPage from "./app/treasury/payment-requests/page";
+import AutomationSettingsPage from "./app/settings/automation/page";
 import ActivityPage from "./app/activity/page";
 import PoliciesPage from "./app/policies/page";
 import CompliancePage from "./app/compliance/page";
@@ -38,6 +40,10 @@ function Routes() {
       return <PaymentsPage />;
     case "/treasury/workflows":
       return <WorkflowsPage />;
+    case "/treasury/payment-requests":
+      return <PaymentRequestsPage />;
+    case "/settings/automation":
+      return <AutomationSettingsPage />;
     case "/activity":
       return <ActivityPage />;
     case "/policies":

@@ -5,6 +5,7 @@ const TABS = [
   { href: "/treasury/schedules", label: "Schedules" },
   { href: "/treasury/budgets", label: "Budgets" },
   { href: "/treasury/payments", label: "Payments" },
+  { href: "/treasury/payment-requests", label: "Requests" },
   { href: "/treasury/workflows", label: "Workflows" },
 ];
 

@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -42,6 +43,9 @@ import type {
   DbWorkflowDefinition,
   DbWorkflowRun,
   DbAutomationControl,
+  DbScheduleVersion,
+  DbNewRecipientReview,
+  DbEmergencyEvent,
   ScheduleFrequency,
   ApprovalMode,
   BudgetPeriod,
@@ -57,12 +61,15 @@ import type { AgentPolicy } from "./policy/model";
 import { makePolicy } from "./policy/model";
 import {
   createSchedule,
+  updateSchedule,
+  getScheduleVersions,
   getSchedulesByUser,
   pauseSchedule,
   resumeSchedule,
   cancelSchedule,
   getOccurrencesByUser,
   proposeManualOccurrence,
+  retryOccurrence,
   createBudget,
   getBudgetsByUser,
   pauseBudget,
@@ -84,6 +91,11 @@ import {
   getAutomationControl,
   pauseAllAutomation,
   resumeAutomation,
+  updateEmergencyRules,
+  getEmergencyEvents,
+  getNewRecipientReviewsByUser,
+  approveNewRecipientReview,
+  rejectNewRecipientReview,
   authorizeExecutionRequest,
   approveExecutionRequest,
   rejectExecutionRequest,
@@ -148,27 +160,17 @@ interface Store {
   workflowDefinitions: DbWorkflowDefinition[];
   workflowRuns: DbWorkflowRun[];
   automationControl: DbAutomationControl | null;
+  newRecipientReviews: DbNewRecipientReview[];
+  emergencyEvents: DbEmergencyEvent[];
 
-  createPaymentSchedule: (
-    agentDeploymentId: string,
-    params: {
-      asset: string;
-      recipient: string;
-      amount: number;
-      reason: string;
-      frequency: ScheduleFrequency;
-      customIntervalDays?: number;
-      startDate: number;
-      endDate?: number;
-      maxOccurrences?: number;
-      approvalMode: ApprovalMode;
-      budgetId?: string;
-    },
-  ) => DbPaymentSchedule;
+  createPaymentSchedule: (agentDeploymentId: string, params: ScheduleFormParams) => DbPaymentSchedule;
+  updatePaymentSchedule: (id: string, params: Partial<ScheduleFormParams>, changeReason?: string) => DbPaymentSchedule;
+  getScheduleVersionHistory: (scheduleId: string) => DbScheduleVersion[];
   pausePaymentSchedule: (id: string) => DbPaymentSchedule;
   resumePaymentSchedule: (id: string) => DbPaymentSchedule;
   cancelPaymentSchedule: (id: string) => DbPaymentSchedule;
   initiateManualOccurrence: (occurrenceId: string) => DbScheduleOccurrence;
+  retryBlockedOccurrence: (occurrenceId: string) => DbScheduleOccurrence;
   runSchedulerNow: () => void;
 
   createTreasuryBudget: (name: string, asset: string, limit: number, period: BudgetPeriod, policyId: string | null) => DbBudget;
@@ -179,7 +181,7 @@ interface Store {
   approveTreasuryPaymentRequest: (id: string) => DbPaymentRequest;
   rejectTreasuryPaymentRequest: (id: string) => DbPaymentRequest;
 
-  createPaymentBatch: (agentDeploymentId: string, name: string, items: BatchItemInput[], budgetId?: string) => DbPaymentBatch;
+  createPaymentBatch: (agentDeploymentId: string, name: string, items: BatchItemInput[], budgetIds?: string[], mode?: "INDEPENDENT" | "ATOMIC") => DbPaymentBatch;
   cancelPaymentBatch: (id: string) => DbPaymentBatch;
 
   createVendorWorkflow: (name?: string) => DbWorkflowDefinition;
@@ -187,10 +189,13 @@ interface Store {
     workflowId: string,
     agentDeploymentId: string,
     intent: { recipient: string; asset: string; amount: number; reason: string },
-    budgetId?: string,
+    budgetIds?: string[],
   ) => DbWorkflowRun;
   approveWorkflowRunStep: (runId: string) => DbWorkflowRun;
   rejectWorkflowRunAction: (runId: string, reason?: string) => DbWorkflowRun;
+
+  approveNewRecipient: (reviewId: string, label: string) => DbNewRecipientReview;
+  rejectNewRecipient: (reviewId: string) => DbNewRecipientReview;
 
   authorizePendingExecution: (requestId: string) => Promise<{ status: "success" | "failed"; txHash: string; bucket: string; error?: string }>;
   approvePendingExecution: (requestId: string) => void;
@@ -198,6 +203,23 @@ interface Store {
 
   pauseAllTreasuryAutomation: (reason?: string) => DbAutomationControl;
   resumeTreasuryAutomation: () => DbAutomationControl;
+  updateTreasuryEmergencyRules: (
+    updates: Partial<Pick<DbAutomationControl, "maxDailyTreasurySpend" | "maxBatchSize" | "maxRecipients" | "requireNewRecipientApproval" | "emergencyPauseThreshold" | "maxFailureRate" | "failureRateWindow">>,
+  ) => DbAutomationControl;
+}
+
+interface ScheduleFormParams {
+  asset: string;
+  recipient: string;
+  amount: number;
+  reason: string;
+  frequency: ScheduleFrequency;
+  customIntervalDays?: number;
+  startDate: number;
+  endDate?: number;
+  maxOccurrences?: number;
+  approvalMode: ApprovalMode;
+  budgetIds?: string[];
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -277,6 +299,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [workflowDefinitions, setWorkflowDefinitions] = useState<DbWorkflowDefinition[]>([]);
   const [workflowRuns, setWorkflowRuns] = useState<DbWorkflowRun[]>([]);
   const [automationControl, setAutomationControl] = useState<DbAutomationControl | null>(null);
+  const [newRecipientReviews, setNewRecipientReviews] = useState<DbNewRecipientReview[]>([]);
+  const [emergencyEvents, setEmergencyEvents] = useState<DbEmergencyEvent[]>([]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -313,6 +337,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setWorkflowDefinitions([]);
         setWorkflowRuns([]);
         setAutomationControl(null);
+        setNewRecipientReviews([]);
+        setEmergencyEvents([]);
         return;
       }
       setDeployments(getDeploymentsByUser(dbUser.id));
@@ -333,6 +359,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setWorkflowDefinitions(getWorkflowDefinitionsByUser(dbUser.id));
       setWorkflowRuns(getRunsByUser(dbUser.id));
       setAutomationControl(getAutomationControl(dbUser.id));
+      setNewRecipientReviews(getNewRecipientReviewsByUser(dbUser.id));
+      setEmergencyEvents(getEmergencyEvents(dbUser.id));
     } catch (e) {
       console.error("[Store] Failed to refresh from DB", e);
     }
@@ -382,6 +410,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setWorkflowDefinitions(getWorkflowDefinitionsByUser(user.id));
         setWorkflowRuns(getRunsByUser(user.id));
         setAutomationControl(getAutomationControl(user.id));
+        setNewRecipientReviews(getNewRecipientReviewsByUser(user.id));
+        setEmergencyEvents(getEmergencyEvents(user.id));
       }, 100);
     } catch (e) {
       console.error("[Store] Failed to ensure user/wallet in DB", e);
@@ -618,11 +648,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * schedules to READY/AWAITING_USER for the connected wallet to authorize.
    * See src/lib/scheduler/worker.ts for the documented boundary.
    */
+  const diagnosticRef = useRef(diagnostic);
+  diagnosticRef.current = diagnostic;
+
   useEffect(() => {
     if (!dbUser) return;
     const tick = () => {
       try {
-        runSchedulerTick(dbUser.id);
+        const d = diagnosticRef.current;
+        runSchedulerTick(dbUser.id, Date.now(), { strk20ProviderDown: !d.isMock && !!d.error });
         refreshFromDb();
       } catch (e) {
         console.error("[Store] Scheduler tick failed", e);
@@ -642,6 +676,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     [dbUser, refreshFromDb],
   );
+
+  const updatePaymentSchedule = useCallback(
+    (id: string, params: Partial<ScheduleFormParams>, changeReason?: string) => {
+      if (!dbUser) throw new Error("Wallet not connected");
+      const schedule = updateSchedule(id, dbUser.id, params, changeReason);
+      refreshFromDb();
+      return schedule;
+    },
+    [dbUser, refreshFromDb],
+  );
+
+  const getScheduleVersionHistory = useCallback((scheduleId: string) => getScheduleVersions(scheduleId), []);
 
   const pausePaymentSchedule = useCallback(
     (id: string) => {
@@ -677,6 +723,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     (occurrenceId: string) => {
       if (!dbUser) throw new Error("Wallet not connected");
       const o = proposeManualOccurrence(occurrenceId, dbUser.id);
+      refreshFromDb();
+      return o;
+    },
+    [dbUser, refreshFromDb],
+  );
+
+  const retryBlockedOccurrence = useCallback(
+    (occurrenceId: string) => {
+      if (!dbUser) throw new Error("Wallet not connected");
+      const o = retryOccurrence(occurrenceId, dbUser.id);
       refreshFromDb();
       return o;
     },
@@ -750,9 +806,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   const createPaymentBatch = useCallback(
-    (agentDeploymentId: string, name: string, items: BatchItemInput[], budgetId?: string) => {
+    (agentDeploymentId: string, name: string, items: BatchItemInput[], budgetIds: string[] = [], mode: "INDEPENDENT" | "ATOMIC" = "INDEPENDENT") => {
       if (!dbUser) throw new Error("Wallet not connected");
-      const b = createBatch(dbUser.id, agentDeploymentId, name, items, budgetId);
+      const b = createBatch(dbUser.id, agentDeploymentId, name, items, budgetIds, mode);
       refreshFromDb();
       return b;
     },
@@ -780,9 +836,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   const startVendorWorkflowRun = useCallback(
-    (workflowId: string, agentDeploymentId: string, intent: { recipient: string; asset: string; amount: number; reason: string }, budgetId?: string) => {
+    (workflowId: string, agentDeploymentId: string, intent: { recipient: string; asset: string; amount: number; reason: string }, budgetIds: string[] = []) => {
       if (!dbUser) throw new Error("Wallet not connected");
-      const run = startWorkflowRun(dbUser.id, workflowId, agentDeploymentId, intent, budgetId);
+      const run = startWorkflowRun(dbUser.id, workflowId, agentDeploymentId, intent, budgetIds);
       refreshFromDb();
       return run;
     },
@@ -805,6 +861,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const run = rejectWorkflowRun(runId, dbUser.id, reason);
       refreshFromDb();
       return run;
+    },
+    [dbUser, refreshFromDb],
+  );
+
+  const approveNewRecipient = useCallback(
+    (reviewId: string, label: string) => {
+      if (!dbUser) throw new Error("Wallet not connected");
+      const r = approveNewRecipientReview(reviewId, dbUser.id, label);
+      refreshFromDb();
+      return r;
+    },
+    [dbUser, refreshFromDb],
+  );
+
+  const rejectNewRecipient = useCallback(
+    (reviewId: string) => {
+      if (!dbUser) throw new Error("Wallet not connected");
+      const r = rejectNewRecipientReview(reviewId, dbUser.id);
+      refreshFromDb();
+      return r;
     },
     [dbUser, refreshFromDb],
   );
@@ -854,6 +930,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return c;
   }, [dbUser, refreshFromDb]);
 
+  const updateTreasuryEmergencyRules = useCallback(
+    (updates: Parameters<Store["updateTreasuryEmergencyRules"]>[0]) => {
+      if (!dbUser) throw new Error("Wallet not connected");
+      const c = updateEmergencyRules(dbUser.id, updates);
+      refreshFromDb();
+      return c;
+    },
+    [dbUser, refreshFromDb],
+  );
+
   const disconnect = useCallback(async () => {
     try {
       if (dbUser) disconnectWalletsByUser(dbUser.id);
@@ -875,6 +961,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setWorkflowDefinitions([]);
     setWorkflowRuns([]);
     setAutomationControl(null);
+    setNewRecipientReviews([]);
+    setEmergencyEvents([]);
   }, [dbUser, walletDisconnect]);
 
   const value = useMemo<Store>(
@@ -932,11 +1020,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       workflowDefinitions,
       workflowRuns,
       automationControl,
+      newRecipientReviews,
+      emergencyEvents,
       createPaymentSchedule,
+      updatePaymentSchedule,
+      getScheduleVersionHistory,
       pausePaymentSchedule,
       resumePaymentSchedule,
       cancelPaymentSchedule,
       initiateManualOccurrence,
+      retryBlockedOccurrence,
       runSchedulerNow,
       createTreasuryBudget,
       pauseTreasuryBudget,
@@ -950,11 +1043,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       startVendorWorkflowRun,
       approveWorkflowRunStep,
       rejectWorkflowRunAction,
+      approveNewRecipient,
+      rejectNewRecipient,
       authorizePendingExecution,
       approvePendingExecution,
       rejectPendingExecution,
       pauseAllTreasuryAutomation,
       resumeTreasuryAutomation,
+      updateTreasuryEmergencyRules,
     }),
     [
       theme,
@@ -1009,11 +1105,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       workflowDefinitions,
       workflowRuns,
       automationControl,
+      newRecipientReviews,
+      emergencyEvents,
       createPaymentSchedule,
+      updatePaymentSchedule,
+      getScheduleVersionHistory,
       pausePaymentSchedule,
       resumePaymentSchedule,
       cancelPaymentSchedule,
       initiateManualOccurrence,
+      retryBlockedOccurrence,
       runSchedulerNow,
       createTreasuryBudget,
       pauseTreasuryBudget,
@@ -1027,11 +1128,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       startVendorWorkflowRun,
       approveWorkflowRunStep,
       rejectWorkflowRunAction,
+      approveNewRecipient,
+      rejectNewRecipient,
       authorizePendingExecution,
       approvePendingExecution,
       rejectPendingExecution,
       pauseAllTreasuryAutomation,
       resumeTreasuryAutomation,
+      updateTreasuryEmergencyRules,
     ],
   );
 

@@ -4,11 +4,14 @@ import { VENDOR_PAYMENT_WORKFLOW_STEPS, stepAt } from "../workflow/model";
 import { getDeploymentById } from "./deployments";
 import { getActivePolicyByDeployment } from "./policies";
 import { createExecutionRequest, computeSpentToday, getReceiptsByUser } from "./executions";
-import { evaluateBudget, recordBudgetUsage } from "./budgets";
+import { evaluateBudgets, recordBudgetsUsage } from "./budgets";
+import { resolveBudgetIds } from "../treasury/budget";
 import { getAutomationControl } from "./automation";
 import { sendAgentMessage } from "./agentMessages";
+import { flagNewRecipientReview } from "./newRecipientReviews";
 import { intentToAgentAction } from "../execution/privateTransfer";
 import { validateAction } from "../policy/validateAction";
+import { REASON } from "../policy/model";
 import { bucketOf } from "../policy/engine";
 import { makeTransferIntent } from "../intent/model";
 import { poseidonish } from "../hash";
@@ -101,7 +104,7 @@ export function startWorkflowRun(
   workflowId: string,
   agentDeploymentId: string,
   intent: { recipient: string; asset: string; amount: number; reason: string },
-  budgetId?: string,
+  budgetIds: string[] = [],
 ): DbWorkflowRun {
   const def = getWorkflowDefinitionById(workflowId, userId);
   if (!def) throw new Error("Workflow definition not found");
@@ -113,7 +116,7 @@ export function startWorkflowRun(
     workflowId,
     userId,
     agentDeploymentId,
-    budgetId,
+    budgetIds,
     intent,
     status: "RUNNING",
     currentStepOrder: 1,
@@ -165,15 +168,15 @@ function evaluateRun(run: DbWorkflowRun): RunEvaluation {
   const spentToday = computeSpentToday(run.agentDeploymentId, run.intent.asset);
   const verdict = validateAction(intentToAgentAction(intent, spentToday), policy.doc);
 
-  const reasons = [...verdict.reasons];
-  let budgetOk = true;
-  if (run.budgetId) {
-    const budgetResult = evaluateBudget(run.budgetId, run.intent.amount);
-    budgetOk = budgetResult.allowed;
-    if (!budgetOk && budgetResult.reason) reasons.push(`E_BUDGET_EXCEEDED: ${budgetResult.reason}`);
+  if (verdict.reasons.some((r) => r.includes(REASON.RECIPIENT_NOT_APPROVED))) {
+    flagNewRecipientReview(run.userId, policy.id, run.intent.recipient, run.intent.asset, "workflow_run", run.id);
   }
 
-  return { policy, verdict, intent, combinedAllowed: verdict.allowed && budgetOk, reasons };
+  const budgetIds = resolveBudgetIds(run);
+  const budgetResult = budgetIds.length > 0 ? evaluateBudgets(budgetIds, run.intent.amount) : null;
+  const reasons = [...verdict.reasons, ...(budgetResult?.reasons.map((r) => `E_BUDGET_EXCEEDED: ${r}`) ?? [])];
+
+  return { policy, verdict, intent, combinedAllowed: verdict.allowed && (!budgetResult || budgetResult.allowed), reasons };
 }
 
 export function advanceWorkflowRun(runId: string, userId: string): DbWorkflowRun {
@@ -205,6 +208,9 @@ export function advanceWorkflowRun(runId: string, userId: string): DbWorkflowRun
         const reason = !recipientApproved
           ? `New recipient ${run.intent.recipient.slice(0, 10)}… requires explicit approval before compliance can pass`
           : `Amount reaches the emergency pause threshold and requires explicit approval`;
+        if (!recipientApproved && policy) {
+          flagNewRecipientReview(userId, policy.id, run.intent.recipient, run.intent.asset, "workflow_run", run.id);
+        }
         createStep(run, def2, "AWAITING_APPROVAL", reason);
         run = db.update<DbWorkflowRun>("workflow_runs", run.id, { status: "AWAITING_APPROVAL", currentStepOrder: nextOrder })!;
         notify(userId, "approval_required", "Workflow needs approval", reason, run.id);
@@ -260,8 +266,9 @@ function prepareTreasuryExecutionStep(run: DbWorkflowRun, def: WorkflowStepDef, 
     evaluatedAt: Date.now(),
   });
 
-  if (run.budgetId && !verdict.requiresHumanApproval) {
-    recordBudgetUsage(run.budgetId, run.userId, run.intent.amount, req.id);
+  const budgetIds = resolveBudgetIds(run);
+  if (budgetIds.length > 0 && !verdict.requiresHumanApproval) {
+    recordBudgetsUsage(budgetIds, run.userId, run.intent.amount, req.id);
   }
 
   createStep(run, def, "PASSED", "Execution request prepared — awaiting wallet authorization");

@@ -1,5 +1,5 @@
 import { advanceSchedule, evaluateAndFireOccurrence, getDueSchedules } from "../api/schedules";
-import { getAutomationControl } from "../api/automation";
+import { getAutomationControl, checkEmergencyTriggers, triggerEmergencyStop } from "../api/automation";
 
 /**
  * Frontend ↔ worker boundary.
@@ -27,16 +27,29 @@ export interface SchedulerTickResult {
   userId: string;
   checkedAt: number;
   automationPaused: boolean;
+  emergencyTriggered: boolean;
   dueCount: number;
   fired: { scheduleId: string; occurrenceId: string; status: string }[];
 }
 
-export function runSchedulerTick(userId: string, now: number = Date.now()): SchedulerTickResult {
+export interface SchedulerTickOptions {
+  /** Wallet-layer signal the DB alone can't see — set from diagnostic state when known. */
+  strk20ProviderDown?: boolean;
+}
+
+export function runSchedulerTick(userId: string, now: number = Date.now(), opts: SchedulerTickOptions = {}): SchedulerTickResult {
+  // Emergency triggers run before anything else — a breach this tick means
+  // nothing below fires this tick either.
+  const check = checkEmergencyTriggers(userId, { strk20ProviderDown: opts.strk20ProviderDown });
+  if (check.triggered && check.trigger && check.detail) {
+    triggerEmergencyStop(userId, check.trigger, check.detail);
+  }
+
   const automation = getAutomationControl(userId);
   const due = getDueSchedules(userId, now);
 
   if (automation.paused) {
-    return { userId, checkedAt: now, automationPaused: true, dueCount: due.length, fired: [] };
+    return { userId, checkedAt: now, automationPaused: true, emergencyTriggered: check.triggered, dueCount: due.length, fired: [] };
   }
 
   const fired: SchedulerTickResult["fired"] = [];
@@ -47,5 +60,5 @@ export function runSchedulerTick(userId: string, now: number = Date.now()): Sche
     fired.push({ scheduleId: schedule.id, occurrenceId: occurrence.id, status: occurrence.status });
   }
 
-  return { userId, checkedAt: now, automationPaused: false, dueCount: due.length, fired };
+  return { userId, checkedAt: now, automationPaused: false, emergencyTriggered: check.triggered, dueCount: due.length, fired };
 }

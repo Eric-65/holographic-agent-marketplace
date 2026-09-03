@@ -341,7 +341,10 @@ export interface DbNotification {
     | "workflow_failed"
     | "budget_exceeded"
     | "automation_paused"
-    | "automation_resumed";
+    | "automation_resumed"
+    | "new_recipient_review_required"
+    | "schedule_updated"
+    | "emergency_stop_triggered";
   title: string;
   message: string;
   read: boolean;
@@ -375,15 +378,31 @@ export interface DbPaymentSchedule {
   endDate?: number;
   maxOccurrences?: number;
   approvalMode: ApprovalMode;
+  /** @deprecated use budgetIds — kept for schedules created before multi-budget support */
   budgetId?: string;
+  /** All budgets that must independently allow an occurrence (policy AND every budget). */
+  budgetIds?: string[];
   status: ScheduleStatus;
   nextOccurrenceAt: number;
   lastOccurrenceAt?: number;
   occurrenceCount: number;
+  /** Bumped by updateSchedule — each edit is preserved in schedule_versions rather than overwritten silently. */
+  version: number;
   createdAt: number;
   updatedAt: number;
   pausedAt?: number;
   cancelledAt?: number;
+}
+
+/** One immutable snapshot of a schedule's editable fields, written before every edit. */
+export interface DbScheduleVersion {
+  id: string;
+  scheduleId: string;
+  userId: string;
+  version: number;
+  snapshot: Omit<DbPaymentSchedule, "id" | "userId" | "createdAt" | "updatedAt">;
+  createdAt: number;
+  changeReason?: string;
 }
 
 /** Execution state of one FIRED occurrence of a schedule — distinct from the schedule's own state. */
@@ -474,7 +493,11 @@ export interface DbPaymentBatch {
   id: string;
   userId: string;
   agentDeploymentId: string;
+  /** @deprecated use budgetIds */
   budgetId?: string;
+  budgetIds?: string[];
+  /** ATOMIC: any blocked item cancels the whole batch. INDEPENDENT (default): each item stands alone. */
+  mode: "INDEPENDENT" | "ATOMIC";
   name: string;
   items: DbBatchItem[];
   status: BatchStatus;
@@ -511,7 +534,9 @@ export interface DbWorkflowRun {
   workflowId: string;
   userId: string;
   agentDeploymentId: string;
+  /** @deprecated use budgetIds */
   budgetId?: string;
+  budgetIds?: string[];
   intent: { recipient: string; asset: string; amount: number; reason: string };
   status: WorkflowStatus;
   currentStepOrder: number;
@@ -555,14 +580,51 @@ export interface DbAutomationControl {
   paused: boolean;
   pausedReason?: string;
   pausedAt?: number;
+  pausedByOwner: boolean; // false when the pause was an automatic emergency trigger, not a manual owner action
   resumedAt?: number;
   maxDailyTreasurySpend: number; // minor units, notional reference ceiling across scheduled/batch/workflow automation
   maxBatchSize: number;
   maxRecipients: number;
   requireNewRecipientApproval: boolean;
   emergencyPauseThreshold: number; // minor units — a single automated action above this always requires approval
+  /** Recent-failure-rate emergency trigger: failures/total over the trailing window, 0–1. */
+  maxFailureRate: number;
+  failureRateWindow: number; // number of most-recent execution results considered
   createdAt: number;
   updatedAt: number;
+}
+
+export type EmergencyTriggerKind =
+  | "DAILY_SPEND_EXCEEDED"
+  | "FAILURE_RATE_EXCEEDED"
+  | "STRK20_PROVIDER_FAILURE"
+  | "POLICY_INTEGRITY_FAILURE"
+  | "MANUAL";
+
+export interface DbEmergencyEvent {
+  id: string;
+  userId: string;
+  trigger: EmergencyTriggerKind;
+  detail: string;
+  action: "PAUSED" | "RESUMED";
+  createdAt: number;
+}
+
+/** A payment blocked purely because its recipient isn't approved yet, awaiting an explicit human decision. */
+export type NewRecipientReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface DbNewRecipientReview {
+  id: string;
+  userId: string;
+  policyId: string;
+  recipient: string;
+  asset: string;
+  /** What was blocked waiting on this recipient — re-attempted after approval. */
+  sourceType: "schedule_occurrence" | "batch_item" | "workflow_run" | "payment_request";
+  sourceId: string;
+  status: NewRecipientReviewStatus;
+  createdAt: number;
+  resolvedAt?: number;
 }
 
 export type DbTableName =
@@ -586,6 +648,7 @@ export type DbTableName =
   | "verification_results"
   | "notifications"
   | "payment_schedules"
+  | "schedule_versions"
   | "schedule_occurrences"
   | "budgets"
   | "budget_usage"
@@ -595,7 +658,9 @@ export type DbTableName =
   | "workflow_runs"
   | "workflow_steps"
   | "agent_messages"
-  | "automation_controls";
+  | "automation_controls"
+  | "emergency_events"
+  | "new_recipient_reviews";
 
 export interface DbSchema {
   users: DbUser[];
@@ -618,6 +683,7 @@ export interface DbSchema {
   verification_results: DbVerificationResult[];
   notifications: DbNotification[];
   payment_schedules: DbPaymentSchedule[];
+  schedule_versions: DbScheduleVersion[];
   schedule_occurrences: DbScheduleOccurrence[];
   budgets: DbBudget[];
   budget_usage: DbBudgetUsage[];
@@ -628,4 +694,6 @@ export interface DbSchema {
   workflow_steps: DbWorkflowStep[];
   agent_messages: DbAgentMessage[];
   automation_controls: DbAutomationControl[];
+  emergency_events: DbEmergencyEvent[];
+  new_recipient_reviews: DbNewRecipientReview[];
 }

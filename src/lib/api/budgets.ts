@@ -1,6 +1,6 @@
 import { db } from "../db/client";
 import type { DbBudget, DbBudgetUsage, BudgetPeriod } from "../db/schema";
-import { checkBudget, periodKeyFor, type BudgetCheckResult } from "../treasury/budget";
+import { checkBudget, checkBudgets, periodKeyFor, type BudgetCheckResult, type MultiBudgetCheckResult } from "../treasury/budget";
 
 /**
  * POST /budgets
@@ -71,6 +71,27 @@ export function evaluateBudget(budgetId: string, amount: number, at: number = Da
   if (!budget) return { allowed: false, reason: "Budget not found", remaining: 0, limit: 0, used: 0 };
   const used = usedInCurrentPeriod(budgetId, at);
   return checkBudget(budget, used, amount);
+}
+
+/**
+ * Every budget in the list must independently allow the amount — no single
+ * budget can override another. Used wherever a schedule/batch item/workflow
+ * run declares more than one applicable budget (e.g. an agent budget AND
+ * the monthly treasury budget).
+ */
+export function evaluateBudgets(budgetIds: string[], amount: number, at: number = Date.now()): MultiBudgetCheckResult {
+  const entries = budgetIds
+    .map((id) => db.getById<DbBudget>("budgets", id))
+    .filter((b): b is DbBudget => !!b)
+    .map((budget) => ({ budget, used: usedInCurrentPeriod(budget.id, at) }));
+  return checkBudgets(entries, amount);
+}
+
+/** Records usage against every budget in the list for one execution — each row is independently idempotent. */
+export function recordBudgetsUsage(budgetIds: string[], userId: string, amount: number, executionRequestId: string, at: number = Date.now()): void {
+  for (const budgetId of budgetIds) {
+    recordBudgetUsage(budgetId, userId, amount, executionRequestId, at);
+  }
 }
 
 /**

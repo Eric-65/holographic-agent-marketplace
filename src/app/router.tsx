@@ -31,6 +31,8 @@ export const ROUTES = [
   "/treasury/budgets",
   "/treasury/payments",
   "/treasury/workflows",
+  "/treasury/payment-requests",
+  "/settings/automation",
   "/activity",
   "/policies",
   "/settings",
@@ -65,6 +67,8 @@ function match(pathname: string): { pattern: RoutePattern; params: Record<string
   if (segs[0] === "treasury" && segs[1] === "budgets") return { pattern: "/treasury/budgets", params: {} };
   if (segs[0] === "treasury" && segs[1] === "payments") return { pattern: "/treasury/payments", params: {} };
   if (segs[0] === "treasury" && segs[1] === "workflows") return { pattern: "/treasury/workflows", params: {} };
+  if (segs[0] === "treasury" && segs[1] === "payment-requests") return { pattern: "/treasury/payment-requests", params: {} };
+  if (segs[0] === "settings" && segs[1] === "automation") return { pattern: "/settings/automation", params: {} };
   if (segs[0] === "creator" && segs[1] === "agents") return { pattern: "/creator/agents", params: {} };
   if (segs[0] === "creator" && segs[1] === "submissions") return { pattern: "/creator/submissions", params: {} };
   if (segs[0] === "creator" && segs[1] === "metrics") return { pattern: "/creator/metrics", params: {} };

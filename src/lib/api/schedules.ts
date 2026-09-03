@@ -1,16 +1,34 @@
 import { db } from "../db/client";
-import type { DbPaymentSchedule, DbScheduleOccurrence, ScheduleFrequency, ApprovalMode } from "../db/schema";
+import type { DbPaymentSchedule, DbScheduleOccurrence, DbScheduleVersion, ScheduleFrequency, ApprovalMode } from "../db/schema";
 import { advanceAfterOccurrence, canTransitionSchedule, isOccurrenceDue, occurrenceKeyFor } from "../treasury/schedule";
+import { resolveBudgetIds } from "../treasury/budget";
 import { getDeploymentById } from "./deployments";
 import { getActivePolicyByDeployment } from "./policies";
 import { createExecutionRequest, computeSpentToday } from "./executions";
-import { evaluateBudget, recordBudgetUsage } from "./budgets";
+import { evaluateBudgets, recordBudgetsUsage } from "./budgets";
 import { getAutomationControl } from "./automation";
+import { flagNewRecipientReview } from "./newRecipientReviews";
 import { intentToAgentAction } from "../execution/privateTransfer";
 import { validateAction } from "../policy/validateAction";
+import { REASON } from "../policy/model";
 import { makeTransferIntent } from "../intent/model";
 import { poseidonish } from "../hash";
 import type { Hex } from "../types";
+
+type ScheduleEditableParams = {
+  asset: string;
+  recipient: string;
+  amount: number;
+  reason: string;
+  frequency: ScheduleFrequency;
+  customIntervalDays?: number;
+  startDate: number;
+  endDate?: number;
+  maxOccurrences?: number;
+  approvalMode: ApprovalMode;
+  budgetId?: string;
+  budgetIds?: string[];
+};
 
 /**
  * POST /treasury/schedules
@@ -24,29 +42,17 @@ import type { Hex } from "../types";
  * boundary this is called from.
  */
 
-export function createSchedule(
-  userId: string,
-  agentDeploymentId: string,
-  params: {
-    asset: string;
-    recipient: string;
-    amount: number;
-    reason: string;
-    frequency: ScheduleFrequency;
-    customIntervalDays?: number;
-    startDate: number;
-    endDate?: number;
-    maxOccurrences?: number;
-    approvalMode: ApprovalMode;
-    budgetId?: string;
-  },
-): DbPaymentSchedule {
-  if (!db.isAvailable()) throw new Error("Backend unavailable");
-  const deployment = getDeploymentById(agentDeploymentId, userId);
-  if (!deployment) throw new Error("Deployment not found");
+function validateScheduleParams(params: ScheduleEditableParams) {
   if (!Number.isSafeInteger(params.amount) || params.amount <= 0) throw new Error("Amount must be a positive integer (minor units)");
   if (!params.recipient) throw new Error("Recipient required");
   if (params.endDate && params.endDate < params.startDate) throw new Error("endDate must be after startDate");
+}
+
+export function createSchedule(userId: string, agentDeploymentId: string, params: ScheduleEditableParams): DbPaymentSchedule {
+  if (!db.isAvailable()) throw new Error("Backend unavailable");
+  const deployment = getDeploymentById(agentDeploymentId, userId);
+  if (!deployment) throw new Error("Deployment not found");
+  validateScheduleParams(params);
 
   return db.create<DbPaymentSchedule>("payment_schedules", {
     userId,
@@ -62,11 +68,70 @@ export function createSchedule(
     maxOccurrences: params.maxOccurrences,
     approvalMode: params.approvalMode,
     budgetId: params.budgetId,
+    budgetIds: params.budgetIds,
     status: "ACTIVE",
     nextOccurrenceAt: params.startDate,
     occurrenceCount: 0,
+    version: 1,
     updatedAt: Date.now(),
   });
+}
+
+/**
+ * Edits a schedule's terms. The pre-edit state is snapshotted into
+ * schedule_versions FIRST so nothing is silently overwritten — past
+ * occurrences keep the policyVersionUsed/executionRequestId they already
+ * recorded regardless of later edits.
+ */
+export function updateSchedule(id: string, userId: string, params: Partial<ScheduleEditableParams>, changeReason?: string): DbPaymentSchedule {
+  const schedule = getScheduleById(id, userId);
+  if (!schedule) throw new Error("Schedule not found");
+  if (schedule.status === "CANCELLED" || schedule.status === "COMPLETED" || schedule.status === "EXPIRED") {
+    throw new Error(`Cannot edit a schedule that is ${schedule.status}`);
+  }
+
+  const merged: ScheduleEditableParams = {
+    asset: params.asset ?? schedule.asset,
+    recipient: params.recipient ?? schedule.recipient,
+    amount: params.amount ?? schedule.amount,
+    reason: params.reason ?? schedule.reason,
+    frequency: params.frequency ?? schedule.frequency,
+    customIntervalDays: params.customIntervalDays ?? schedule.customIntervalDays,
+    startDate: params.startDate ?? schedule.startDate,
+    endDate: params.endDate ?? schedule.endDate,
+    maxOccurrences: params.maxOccurrences ?? schedule.maxOccurrences,
+    approvalMode: params.approvalMode ?? schedule.approvalMode,
+    budgetId: params.budgetId ?? schedule.budgetId,
+    budgetIds: params.budgetIds ?? schedule.budgetIds,
+  };
+  validateScheduleParams(merged);
+
+  const { id: _id, userId: _userId, createdAt: _createdAt, updatedAt: _updatedAt, ...snapshot } = schedule;
+  db.create<DbScheduleVersion>("schedule_versions", {
+    scheduleId: schedule.id,
+    userId,
+    version: schedule.version,
+    snapshot,
+    changeReason,
+  });
+
+  const updated = db.update<DbPaymentSchedule>("payment_schedules", id, { ...merged, version: schedule.version + 1 })!;
+  try {
+    db.create("notifications", {
+      userId,
+      type: "schedule_updated",
+      title: "Schedule updated",
+      message: `"${updated.reason}" updated to v${updated.version}${changeReason ? ` — ${changeReason}` : ""}`,
+      read: false,
+      relatedId: id,
+      createdAt: Date.now(),
+    });
+  } catch {}
+  return updated;
+}
+
+export function getScheduleVersions(scheduleId: string): DbScheduleVersion[] {
+  return db.find<DbScheduleVersion>("schedule_versions", (v) => v.scheduleId === scheduleId).sort((a, b) => b.version - a.version);
 }
 
 export function getSchedulesByUser(userId: string): DbPaymentSchedule[] {
@@ -193,15 +258,16 @@ function fireAgainstPolicy(schedule: DbPaymentSchedule, occurrence: DbScheduleOc
   const action = intentToAgentAction(intent, spentToday);
   const policyVerdict = validateAction(action, policy.doc);
 
-  let budgetResult: ReturnType<typeof evaluateBudget> | null = null;
-  if (schedule.budgetId) {
-    budgetResult = evaluateBudget(schedule.budgetId, schedule.amount, occurrence.occurrenceAt);
-  }
+  const budgetIds = resolveBudgetIds(schedule);
+  const budgetResult = budgetIds.length > 0 ? evaluateBudgets(budgetIds, schedule.amount, occurrence.occurrenceAt) : null;
 
-  const combinedReasons = [...policyVerdict.reasons];
-  if (budgetResult && !budgetResult.allowed && budgetResult.reason) combinedReasons.push(`E_BUDGET_EXCEEDED: ${budgetResult.reason}`);
+  const combinedReasons = [...policyVerdict.reasons, ...(budgetResult?.reasons.map((r) => `E_BUDGET_EXCEEDED: ${r}`) ?? [])];
   const combinedAllowed = policyVerdict.allowed && (!budgetResult || budgetResult.allowed);
   const requiresHumanApproval = combinedAllowed && (policyVerdict.requiresHumanApproval || schedule.approvalMode === "REQUIRE_APPROVAL");
+
+  if (policyVerdict.reasons.some((r) => r.includes(REASON.RECIPIENT_NOT_APPROVED))) {
+    flagNewRecipientReview(schedule.userId, policy.id, schedule.recipient, schedule.asset, "schedule_occurrence", occurrence.id);
+  }
 
   const policyHash = poseidonish(policy.doc) as Hex;
   const intentHash = poseidonish({ agentId: intent.agentId, asset: intent.asset, amount: intent.amount, id: intent.id }) as Hex;
@@ -230,7 +296,7 @@ function fireAgainstPolicy(schedule: DbPaymentSchedule, occurrence: DbScheduleOc
     } else {
       notify(schedule.userId, "payment_ready", "Payment ready", `${schedule.reason} passed policy — ready for wallet authorization`, schedule.id);
     }
-    if (schedule.budgetId) recordBudgetUsage(schedule.budgetId, schedule.userId, schedule.amount, req.id, occurrence.occurrenceAt);
+    if (budgetIds.length > 0) recordBudgetsUsage(budgetIds, schedule.userId, schedule.amount, req.id, occurrence.occurrenceAt);
   }
 
   return updated;
@@ -253,6 +319,31 @@ export function proposeManualOccurrence(occurrenceId: string, userId: string): D
 
   const policy = getActivePolicyByDeployment(schedule.agentDeploymentId);
   if (!policy) return db.update<DbScheduleOccurrence>("schedule_occurrences", occurrence.id, { status: "BLOCKED", blockedReason: "No active policy" })!;
+
+  return fireAgainstPolicy(schedule, occurrence, policy);
+}
+
+/**
+ * Re-evaluates a BLOCKED occurrence from scratch (fresh policy, fresh
+ * budgets) — for after the user fixes whatever blocked it (approves a new
+ * recipient, tops up a budget, resumes automation). The schedule's own
+ * cadence already moved on to its next occurrence; this only affects the
+ * one blocked occurrence being retried.
+ */
+export function retryOccurrence(occurrenceId: string, userId: string): DbScheduleOccurrence {
+  const occurrence = db.getById<DbScheduleOccurrence>("schedule_occurrences", occurrenceId);
+  if (!occurrence) throw new Error("Occurrence not found");
+  if (occurrence.userId !== userId) throw new Error("Unauthorized");
+  if (occurrence.status !== "BLOCKED") return occurrence;
+
+  const schedule = getScheduleById(occurrence.scheduleId, userId);
+  if (!schedule) throw new Error("Schedule not found");
+
+  const automation = getAutomationControl(userId);
+  if (automation.paused) return occurrence;
+
+  const policy = getActivePolicyByDeployment(schedule.agentDeploymentId);
+  if (!policy) return db.update<DbScheduleOccurrence>("schedule_occurrences", occurrence.id, { blockedReason: "No active policy" })!;
 
   return fireAgainstPolicy(schedule, occurrence, policy);
 }
