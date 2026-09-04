@@ -145,12 +145,12 @@ export default function ApprovalDialog({
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center p-4 overlay" onClick={onClose}>
       <div
-        className="w-full max-w-[720px] max-h-[88dvh] overflow-y-auto overscroll-contain rounded-2xl surface-2 holo-edge"
+        className="w-full max-w-[720px] max-h-[88dvh] overflow-y-auto overscroll-contain rounded-2xl modal-surface holo-edge"
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
         <div
-          className="flex items-start justify-between gap-4 px-6 py-4 border-b sticky top-0 z-10 surface-2 rounded-t-2xl"
+          className="flex items-start justify-between gap-4 px-6 py-4 border-b sticky top-0 z-10 modal-surface rounded-t-2xl"
           style={{ borderColor: "var(--border)" }}
         >
           <div>
@@ -289,7 +289,7 @@ export default function ApprovalDialog({
 
         {/* footer */}
         <div
-          className="flex items-center justify-between gap-3 px-6 py-4 border-t sticky bottom-0 surface-2 rounded-b-2xl"
+          className="flex items-center justify-between gap-3 px-6 py-4 border-t sticky bottom-0 modal-surface rounded-b-2xl"
           style={{ borderColor: "var(--border)" }}
         >
           <span className="mono text-[10.5px] faint truncate">

@@ -165,6 +165,22 @@ h1, h2, h3, h4, .font-display {
   box-shadow: var(--shadow);
 }
 
+/* Modal/dialog panels — unlike .surface-2 (deliberately translucent for
+   glass hover accents), a panel stacked over live page content must be
+   genuinely opaque or whatever is behind it stays legible through the
+   card. --bg-2 is a solid theme color, not a low-alpha wash, so this is
+   opaque regardless of theme; the tint + blur on top keep the same glass
+   look. */
+.modal-surface {
+  background:
+    linear-gradient(rgb(var(--surface-rgb) / var(--surface-2-a)), rgb(var(--surface-rgb) / var(--surface-2-a))),
+    var(--bg-2);
+  border: 1px solid var(--border-strong);
+  backdrop-filter: blur(24px) saturate(155%);
+  -webkit-backdrop-filter: blur(24px) saturate(155%);
+  box-shadow: var(--shadow);
+}
+
 .rail {
   background: var(--rail);
   border-color: var(--border);

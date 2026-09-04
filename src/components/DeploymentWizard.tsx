@@ -67,8 +67,8 @@ export default function DeploymentWizard({ agent, dbAgent, onClose, onDeployed }
 
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center p-4 overlay" onClick={onClose}>
-      <div className="w-full max-w-[800px] max-h-[90vh] overflow-y-auto rounded-2xl surface-2 border" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 surface-2 p-5 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
+      <div className="w-full max-w-[800px] max-h-[90vh] overflow-y-auto rounded-2xl modal-surface border" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 modal-surface p-5 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
           <div>
             <div className="mono text-[10px] faint uppercase">Deployment Wizard</div>
             <div className="font-display text-[18px] font-semibold">{agent.name} — {dbAgent.deploymentStatus}</div>
