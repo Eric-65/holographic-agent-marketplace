@@ -15,6 +15,9 @@ import NewRecipientReviewPanel from "../../components/treasury/NewRecipientRevie
 import { formatMinor } from "../../components/treasury/ExecutionRequestCard";
 import { Link } from "../router";
 import { Badge, Button, Panel, PanelHeader, SectionTitle, Stat } from "../../components/ui/primitives";
+import MotionReveal, { MotionRevealGroup } from "../../components/motion/MotionReveal";
+import MotionCountUp from "../../components/motion/MotionCountUp";
+import MotionScoreRing from "../../components/motion/MotionScoreRing";
 
 export default function TreasuryPage() {
   const {
@@ -97,19 +100,53 @@ export default function TreasuryPage() {
 
       <NewRecipientReviewPanel />
 
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <Stat label="Total value" value={masked ? "••••" : usd(t.total, { compact: true })} sub="public + shielded" />
-        <Stat label="Shielded" value={masked ? "••••" : usd(t.shielded, { compact: true })} sub={`${((t.shielded / t.total) * 100 || 0).toFixed(0)}% of treasury`} tone="cyan" />
-        <Stat label="Active agents" value={activeDeployments.length} sub={`${deployments.length} deployments`} tone="good" />
-        <Stat label="Pending approvals" value={pendingApprovals.length} sub="requires human" tone="warn" />
-      </div>
+      <MotionRevealGroup className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <MotionReveal>
+          <Stat label="Total value" value={masked ? "••••" : <MotionCountUp value={t.total} format={(n) => usd(n, { compact: true })} />} sub="public + shielded" />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat label="Shielded" value={masked ? "••••" : <MotionCountUp value={t.shielded} format={(n) => usd(n, { compact: true })} />} sub={`${((t.shielded / t.total) * 100 || 0).toFixed(0)}% of treasury`} tone="cyan" />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat label="Active agents" value={<MotionCountUp value={activeDeployments.length} />} sub={`${deployments.length} deployments`} tone="good" />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat label="Pending approvals" value={<MotionCountUp value={pendingApprovals.length} />} sub="requires human" tone="warn" />
+        </MotionReveal>
+      </MotionRevealGroup>
 
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <Stat label="Active schedules" value={activeSchedules.length} sub={`${dueWithin7d.length} due within 7 days`} />
-        <Stat label="Budget usage" value={totalBudgetLimit > 0 ? `${Math.round((totalBudgetUsed / totalBudgetLimit) * 100)}%` : "—"} sub={budgets.length > 0 ? `${formatMinor(totalBudgetUsed)} / ${formatMinor(totalBudgetLimit)}` : "no budgets"} tone={totalBudgetLimit > 0 && totalBudgetUsed / totalBudgetLimit >= 0.9 ? "warn" : undefined} />
-        <Stat label="Active workflows" value={activeWorkflowRuns.length} sub={`${workflowRuns.length} total runs`} tone="cyan" />
-        <Stat label="Recent executions" value={dbReceipts.length} sub="persisted receipts" tone="good" />
-      </div>
+      <MotionRevealGroup className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <MotionReveal>
+          <Stat label="Active schedules" value={<MotionCountUp value={activeSchedules.length} />} sub={`${dueWithin7d.length} due within 7 days`} />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat label="Budget usage" value={totalBudgetLimit > 0 ? `${Math.round((totalBudgetUsed / totalBudgetLimit) * 100)}%` : "—"} sub={budgets.length > 0 ? `${formatMinor(totalBudgetUsed)} / ${formatMinor(totalBudgetLimit)}` : "no budgets"} tone={totalBudgetLimit > 0 && totalBudgetUsed / totalBudgetLimit >= 0.9 ? "warn" : undefined} />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat label="Active workflows" value={<MotionCountUp value={activeWorkflowRuns.length} />} sub={`${workflowRuns.length} total runs`} tone="cyan" />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat label="Recent executions" value={<MotionCountUp value={dbReceipts.length} />} sub="persisted receipts" tone="good" />
+        </MotionReveal>
+      </MotionRevealGroup>
+
+      {budgets.length > 0 && (
+        <MotionReveal mode="inView">
+          <Panel>
+            <div className="flex flex-wrap items-center gap-6">
+              <MotionScoreRing
+                value={totalBudgetLimit > 0 ? (totalBudgetUsed / totalBudgetLimit) * 100 : 0}
+                label="Budget utilization"
+                sublabel={`${formatMinor(totalBudgetUsed)} / ${formatMinor(totalBudgetLimit)}`}
+                tone={totalBudgetLimit > 0 && totalBudgetUsed / totalBudgetLimit >= 0.9 ? "warn" : "cyan"}
+              />
+              <div className="flex-1 min-w-[180px] text-[11.5px] dim leading-relaxed">
+                Aggregated across {budgets.length} budget{budgets.length === 1 ? "" : "s"} for the current period. Every scheduled/batch/workflow payment must pass its own policy check <em>and</em> every budget it's attached to — this ring is presentation only, never the enforcement itself.
+              </div>
+            </div>
+          </Panel>
+        </MotionReveal>
+      )}
 
       {activeSchedules.length > 0 && (
         <Panel padded={false} edge>

@@ -1,4 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { motion } from "framer-motion";
+import { useReducedMotion } from "../../lib/motion/useReducedMotion";
 
 export function Panel({
   children,
@@ -111,20 +113,29 @@ export function Dot({ tone = "neutral", pulse = false }: { tone?: Tone; pulse?: 
   );
 }
 
-interface BtnProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface BtnProps
+  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onDrag" | "onDragStart" | "onDragEnd" | "onAnimationStart" | "onAnimationEnd" | "onAnimationIteration"> {
   variant?: "primary" | "ghost" | "outline" | "danger";
   size?: "sm" | "md";
 }
 
+/**
+ * Every button in the app responds instantly to hover/press — whileHover
+ * and whileTap are transform-only (scale), so there's no layout cost and no
+ * risk of the disabled/loading states looking "stuck": reduced motion just
+ * removes the scale, the button still works identically either way.
+ */
 export function Button({
   variant = "outline",
   size = "md",
   className = "",
   children,
+  disabled,
   ...rest
 }: BtnProps) {
+  const reduced = useReducedMotion();
   const h = size === "sm" ? "h-8 px-3 text-[12px]" : "h-9 px-4 text-[13px]";
-  const base = `inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all disabled:opacity-45 disabled:cursor-not-allowed ${h}`;
+  const base = `inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${h}`;
   const styles: Record<string, string> = {
     primary: "text-white btn-primary",
     outline: "surface hover:surface-2",
@@ -132,9 +143,16 @@ export function Button({
     danger: "btn-danger",
   };
   return (
-    <button className={`${base} ${styles[variant]} ${className}`} {...rest}>
+    <motion.button
+      className={`${base} ${styles[variant]} ${className}`}
+      disabled={disabled}
+      whileHover={disabled || reduced ? undefined : { scale: 1.015 }}
+      whileTap={disabled || reduced ? undefined : { scale: 0.97 }}
+      transition={{ duration: 0.12 }}
+      {...rest}
+    >
       {children}
-    </button>
+    </motion.button>
   );
 }
 

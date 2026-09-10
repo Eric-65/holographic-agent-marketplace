@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { motion } from "framer-motion";
 import {
   Activity,
   Bot,
@@ -73,9 +74,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 }}
               >
                 {on && (
-                  <span
+                  <motion.span
+                    layoutId="nav-active-indicator"
                     className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-[2px] rounded-r"
                     style={{ background: "var(--accent-3)" }}
+                    transition={{ type: "spring", stiffness: 380, damping: 32 }}
                   />
                 )}
                 <Icon size={14} style={{ color: on ? "var(--accent-3)" : "var(--text-faint)" }} />
@@ -159,11 +162,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <Link
               key={n.href}
               href={n.href}
-              className="flex-1 py-2.5 flex flex-col items-center gap-1"
+              className="relative flex-1 py-2.5 flex flex-col items-center gap-1"
               style={{ color: on ? "var(--accent-3)" : "var(--text-faint)" }}
             >
+              {on && (
+                <motion.span
+                  layoutId="mobile-nav-active-indicator"
+                  className="absolute top-0 left-1/2 -translate-x-1/2 h-[2px] w-6 rounded-b"
+                  style={{ background: "var(--accent-3)" }}
+                  transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                />
+              )}
               <Icon size={15} />
-              <span className="text-[9.5px]\">{n.label}</span>
+              <span className="text-[9.5px]">{n.label}</span>
             </Link>
           );
         })}

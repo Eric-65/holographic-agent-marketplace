@@ -8,6 +8,16 @@ import { short } from "../../../lib/hash";
 import { Badge, Button, Empty, Panel, PanelHeader, SectionTitle } from "../../../components/ui/primitives";
 import TreasuryTabs from "../../../components/treasury/TreasuryTabs";
 import ExecutionRequestCard, { formatMinor } from "../../../components/treasury/ExecutionRequestCard";
+import MotionStatus, { type PipelineStatus } from "../../../components/motion/MotionStatus";
+
+const STEP_STATUS_TO_PIPELINE: Record<string, PipelineStatus> = {
+  PASSED: "COMPLETED",
+  FAILED: "FAILED",
+  AWAITING_APPROVAL: "AWAITING_APPROVAL",
+  RUNNING: "EXECUTING",
+  PENDING: "IDLE",
+  SKIPPED: "PAUSED",
+};
 
 const USDC = 1_000_000;
 
@@ -165,17 +175,23 @@ export default function WorkflowsPage() {
                         {formatMinor(run.intent.amount)} {run.intent.asset} → {short(run.intent.recipient, 8, 4)}
                       </div>
                     </div>
+                    <MotionStatus status={runToPipelineStatus(run.status)} hideLabel size="sm" />
                     <RunStatusBadge status={run.status} />
                     <ChevronRight size={13} className="faint transition-transform" style={{ transform: isOpen ? "rotate(90deg)" : undefined }} />
                   </button>
 
                   {isOpen && (
                     <div className="px-4 pb-4 space-y-3">
+                      {steps.length > 0 && (
+                        <div className="mono text-[10.5px] faint">
+                          Step {Math.min(run.currentStepOrder, def?.steps.length ?? steps.length)} of {def?.steps.length ?? steps.length}
+                        </div>
+                      )}
                       <div className="space-y-1.5">
                         {steps.map((step) => (
                           <div key={step.id} className="flex flex-wrap items-start gap-x-2.5 gap-y-0.5 text-[12px]">
                             <div className="flex items-center gap-2.5 w-full sm:w-[150px] shrink-0">
-                              <StepDot status={step.status} />
+                              <MotionStatus status={STEP_STATUS_TO_PIPELINE[step.status] ?? "IDLE"} hideLabel size="sm" />
                               <span className="faint">{WORKFLOW_STEP_LABEL[step.type]}</span>
                             </div>
                             <span className="mono text-[11px] min-w-0 break-words pl-[17px] sm:pl-0" style={{ color: step.status === "FAILED" ? "var(--bad)" : undefined }}>
@@ -231,12 +247,25 @@ export default function WorkflowsPage() {
   );
 }
 
+function runToPipelineStatus(status: string): PipelineStatus {
+  switch (status) {
+    case "COMPLETED":
+      return "COMPLETED";
+    case "FAILED":
+    case "CANCELLED":
+      return "FAILED";
+    case "AWAITING_APPROVAL":
+      return "AWAITING_APPROVAL";
+    case "RUNNING":
+      return "EXECUTING";
+    case "PAUSED":
+      return "PAUSED";
+    default:
+      return "IDLE";
+  }
+}
+
 function RunStatusBadge({ status }: { status: string }) {
   const tone = status === "COMPLETED" ? "good" : status === "FAILED" || status === "CANCELLED" ? "bad" : status === "AWAITING_APPROVAL" ? "warn" : "cyan";
   return <Badge tone={tone as any}>{status.replace(/_/g, " ")}</Badge>;
-}
-
-function StepDot({ status }: { status: string }) {
-  const color = status === "PASSED" ? "var(--good)" : status === "FAILED" ? "var(--bad)" : status === "AWAITING_APPROVAL" ? "var(--warn)" : "var(--text-faint)";
-  return <span className="h-[7px] w-[7px] rounded-full shrink-0" style={{ background: color }} />;
 }

@@ -10,6 +10,9 @@ import PrivacyStatus from "../components/PrivacyStatus";
 import DiagnosticPanel from "../components/DiagnosticPanel";
 import NotificationPanel from "../components/NotificationPanel";
 import { Button, Panel, PanelHeader, SectionTitle, Stat } from "../components/ui/primitives";
+import MotionReveal, { MotionRevealGroup } from "../components/motion/MotionReveal";
+import MotionCountUp from "../components/motion/MotionCountUp";
+import MotionParallax from "../components/motion/MotionParallax";
 
 export default function OverviewPage() {
   const { agents, positions, receipts, policies, wallet, diagnostic, adapter } = useStore();
@@ -20,34 +23,60 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-7">
-      <SectionTitle
-        eyebrow="Control plane"
-        title="Overview"
-        sub="Policy-controlled private execution across your bound agents. Agents propose, the deterministic engine decides, your wallet executes through STRK20."
-        right={
-          <Link href="/agents">
-            <Button variant="primary" size="sm">
-              Browse agents <ArrowRight size={13} />
-            </Button>
-          </Link>
-        }
-      />
-
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <Stat label="Shielded value" value={usd(t.shielded, { compact: true })} sub={`${t.notes} notes · wallet-reported`} tone="cyan" />
-        <Stat label="Public value" value={usd(t.public, { compact: true })} sub="unshielded balances" />
-        <Stat label="Agents bound" value={`${activeAgents.length}/${agents.length}`} sub={`${activePolicies.length} active policies`} tone="good" />
-        <Stat label="Delegated authority" value="none" sub="no key delegation, ever" tone="good" />
+      <div className="relative">
+        <MotionParallax className="pointer-events-none absolute -top-10 -right-10 h-40 w-40 opacity-40" range={10}>
+          <div
+            aria-hidden
+            className="h-full w-full rounded-full"
+            style={{ background: "radial-gradient(circle, color-mix(in oklab, var(--accent-3) 45%, transparent), transparent 70%)", filter: "blur(6px)" }}
+          />
+        </MotionParallax>
+        <SectionTitle
+          eyebrow="Control plane"
+          title="Overview"
+          sub="Policy-controlled private execution across your bound agents. Agents propose, the deterministic engine decides, your wallet executes through STRK20."
+          right={
+            <Link href="/agents">
+              <Button variant="primary" size="sm">
+                Browse agents <ArrowRight size={13} />
+              </Button>
+            </Link>
+          }
+        />
       </div>
 
+      <MotionRevealGroup className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <MotionReveal>
+          <Stat label="Shielded value" value={<MotionCountUp value={t.shielded} format={(n) => usd(n, { compact: true })} />} sub={`${t.notes} notes · wallet-reported`} tone="cyan" />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat label="Public value" value={<MotionCountUp value={t.public} format={(n) => usd(n, { compact: true })} />} sub="unshielded balances" />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat
+            label="Agents bound"
+            value={
+              <>
+                <MotionCountUp value={activeAgents.length} />/{agents.length}
+              </>
+            }
+            sub={`${activePolicies.length} active policies`}
+            tone="good"
+          />
+        </MotionReveal>
+        <MotionReveal>
+          <Stat label="Delegated authority" value="none" sub="no key delegation, ever" tone="good" />
+        </MotionReveal>
+      </MotionRevealGroup>
+
       <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-3">
-        <div className="space-y-3">
+        <MotionReveal className="space-y-3" mode="inView">
           <ActivitySummary receipts={receipts} />
           <DiagnosticPanel wallet={wallet} diagnostic={diagnostic} adapter={adapter} />
           <NotificationPanel />
-        </div>
+        </MotionReveal>
 
-        <div className="space-y-3">
+        <MotionReveal className="space-y-3" mode="inView" delay={1}>
           <PrivacyStatus wallet={wallet} diagnostic={diagnostic} variant="panel" />
 
           <Panel>
@@ -75,7 +104,7 @@ export default function OverviewPage() {
               ))}
             </ul>
           </Panel>
-        </div>
+        </MotionReveal>
       </div>
 
       <div>
@@ -94,7 +123,7 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-3">
+      <MotionReveal mode="inView" className="grid lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-3">
         <Panel padded={false}>
           <PanelHeader
             title="Recent receipts"
@@ -126,11 +155,13 @@ export default function OverviewPage() {
                 <div key={p.asset}>
                   <div className="flex items-center justify-between text-[12px] mb-1.5">
                     <span>{p.asset}</span>
-                    <span className="mono faint">{share.toFixed(0)}% shielded</span>
+                    <span className="mono faint">
+                      <MotionCountUp value={share} format={(n) => n.toFixed(0)} suffix="% shielded" />
+                    </span>
                   </div>
                   <div className="h-[5px] rounded-full overflow-hidden" style={{ background: "var(--track)" }}>
                     <div
-                      className="h-full rounded-full"
+                      className="h-full rounded-full transition-[width] duration-500"
                       style={{
                         width: `${share}%`,
                         background: "linear-gradient(90deg, var(--accent), var(--accent-3))",
@@ -149,7 +180,7 @@ export default function OverviewPage() {
             Shielded figures are read from the wallet and never leave this device.
           </div>
         </Panel>
-      </div>
+      </MotionReveal>
     </div>
   );
 }

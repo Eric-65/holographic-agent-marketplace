@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
 import { Button, Panel } from "./ui/primitives";
 import { Check, AlertTriangle } from "lucide-react";
@@ -8,10 +8,11 @@ import { makePolicy } from "../lib/policy/model";
 import PolicyEditor from "./PolicyEditor";
 import RecipientManager from "./RecipientManager";
 import type { Agent } from "../lib/types";
+import MotionModal from "./motion/MotionModal";
 
 type Step = "review" | "capabilities" | "policy" | "recipients" | "authority" | "risk" | "deploy";
 
-export default function DeploymentWizard({ agent, dbAgent, onClose, onDeployed }: { agent: Agent; dbAgent: DbAgent; onClose: () => void; onDeployed: () => void }) {
+export default function DeploymentWizard({ open, agent, dbAgent, onClose, onDeployed }: { open: boolean; agent: Agent; dbAgent: DbAgent; onClose: () => void; onDeployed: () => void }) {
   const { dbUser, dbWallet, deployAgent, dbPolicies, wallet } = useStore();
   const [step, setStep] = useState<Step>("review");
   const [policy, setPolicy] = useState<AgentPolicy>(() =>
@@ -30,6 +31,16 @@ export default function DeploymentWizard({ agent, dbAgent, onClose, onDeployed }
   const [deploying, setDeploying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+
+  // The wizard is now always mounted (so MotionModal can animate its exit) —
+  // reset progress back to the first step each time it's reopened, rather
+  // than resuming wherever it was left after a previous close.
+  useEffect(() => {
+    if (!open) return;
+    setStep("review");
+    setError(null);
+    setConfirmed(false);
+  }, [open]);
 
   const steps: { key: Step; label: string }[] = [
     { key: "review", label: "Review Agent" },
@@ -66,8 +77,7 @@ export default function DeploymentWizard({ agent, dbAgent, onClose, onDeployed }
   };
 
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center p-4 overlay" onClick={onClose}>
-      <div className="w-full max-w-[800px] max-h-[90vh] overflow-y-auto rounded-2xl modal-surface border" onClick={(e) => e.stopPropagation()}>
+    <MotionModal open={open} onClose={onClose} zIndex={80} panelClassName="w-full max-w-[800px] max-h-[90vh] overflow-y-auto rounded-2xl modal-surface border">
         <div className="sticky top-0 z-10 modal-surface p-5 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
           <div>
             <div className="mono text-[10px] faint uppercase">Deployment Wizard</div>
@@ -313,8 +323,7 @@ export default function DeploymentWizard({ agent, dbAgent, onClose, onDeployed }
             </Panel>
           )}
         </div>
-      </div>
-    </div>
+    </MotionModal>
   );
 }
 

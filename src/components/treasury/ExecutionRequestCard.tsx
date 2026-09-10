@@ -1,15 +1,23 @@
 import { useState } from "react";
+import { motion } from "framer-motion";
 import { Check, Loader2, ShieldAlert, ShieldCheck, XCircle } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { short } from "../../lib/hash";
 import { usd } from "../../lib/format";
 import { Badge, Button } from "../ui/primitives";
+import MotionStatus, { type PipelineStatus } from "../motion/MotionStatus";
+import { fadeUp } from "../../lib/motion/variants";
 
 /**
  * Renders one execution request at whatever stage it's in and offers the
  * exact next legitimate action — approve, authorize via wallet, or nothing
  * (blocked/completed). This is the single place schedules, batches, payment
  * requests and workflow runs all reach the wallet from.
+ *
+ * The status animation here is entirely derived from real state
+ * (`req.status`, `busy`, `outcome`) — there is no timer standing in for an
+ * actual wallet/STRK20 result, and "Executed" never renders until
+ * `authorizePendingExecution` has actually resolved successfully.
  */
 export default function ExecutionRequestCard({ requestId, label }: { requestId: string; label?: string }) {
   const { executionRequests, approvePendingExecution, authorizePendingExecution } = useStore();
@@ -38,6 +46,22 @@ export default function ExecutionRequestCard({ requestId, label }: { requestId: 
     }
   };
 
+  const pipelineStatus: PipelineStatus = busy
+    ? "EXECUTING"
+    : outcome?.status === "success"
+      ? "COMPLETED"
+      : outcome?.status === "failed"
+        ? "FAILED"
+        : req.status === "BLOCKED"
+          ? "BLOCKED"
+          : req.status === "AWAITING_USER" && !req.approvedByUser
+            ? "AWAITING_APPROVAL"
+            : req.status === "POLICY_APPROVED" || req.status === "AWAITING_USER"
+              ? "APPROVED"
+              : req.status === "COMPLETED" || req.status === "executed"
+                ? "COMPLETED"
+                : "IDLE";
+
   return (
     <div className="rounded-lg p-3 space-y-2" style={{ background: "var(--track)", border: "1px solid var(--border)" }}>
       <div className="flex items-center justify-between gap-2">
@@ -47,13 +71,16 @@ export default function ExecutionRequestCard({ requestId, label }: { requestId: 
             {amount} {req.intent.asset} → {short(req.intent.recipient, 8, 4)}
           </div>
         </div>
-        <StatusBadge status={req.status} />
+        <div className="flex items-center gap-2 shrink-0">
+          <MotionStatus status={pipelineStatus} hideLabel size="sm" />
+          <StatusBadge status={req.status} />
+        </div>
       </div>
 
       {req.status === "BLOCKED" && (
-        <div className="text-[10.5px] mono" style={{ color: "var(--bad)" }}>
+        <motion.div variants={fadeUp} initial="hidden" animate="visible" className="text-[10.5px] mono" style={{ color: "var(--bad)" }}>
           {req.verdict.reasons[0] ?? "Rejected by policy"}
-        </div>
+        </motion.div>
       )}
 
       {req.status === "AWAITING_USER" && !req.approvedByUser && (
@@ -74,13 +101,19 @@ export default function ExecutionRequestCard({ requestId, label }: { requestId: 
       )}
 
       {outcome && (
-        <div className="flex items-center gap-2 text-[11px]" style={{ color: outcome.status === "success" ? "var(--good)" : "var(--bad)" }}>
+        <motion.div
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          className="flex items-center gap-2 text-[11px]"
+          style={{ color: outcome.status === "success" ? "var(--good)" : "var(--bad)" }}
+        >
           {outcome.status === "success" ? <ShieldCheck size={12} /> : <XCircle size={12} />}
           {outcome.status === "success" ? "Executed" : `Failed: ${outcome.error ?? "unknown error"}`}
-        </div>
+        </motion.div>
       )}
 
-      {(req.status === "COMPLETED" || req.status === "executed") && (
+      {(req.status === "COMPLETED" || req.status === "executed") && !outcome && (
         <div className="flex items-center gap-2 text-[11px]" style={{ color: "var(--good)" }}>
           <ShieldCheck size={12} /> Executed
         </div>

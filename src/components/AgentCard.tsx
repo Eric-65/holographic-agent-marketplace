@@ -6,6 +6,8 @@ import AgentStatus from "./AgentStatus";
 import { Badge } from "./ui/primitives";
 import { useStore } from "../lib/store";
 import { isContractDeployed } from "../lib/contracts/config";
+import MotionCard from "./motion/MotionCard";
+import MotionReveal from "./motion/MotionReveal";
 
 export default function AgentCard({
   agent,
@@ -34,10 +36,9 @@ export default function AgentCard({
   ];
 
   return (
-    <Link
-      href={href ?? `/agents/${agent.id}`}
-      className="group surface rounded-xl p-5 flex flex-col hover:surface-2 transition-all duration-200 hover:-translate-y-[1px] block"
-    >
+    <MotionReveal mode="inView" kind="scale">
+    <MotionCard reflection className="group surface rounded-xl p-5 flex flex-col hover:surface-2 transition-colors duration-200">
+      <Link href={href ?? `/agents/${agent.id}`} className="contents">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
           <span
@@ -112,7 +113,9 @@ export default function AgentCard({
       <div className="mt-3 text-[10px] faint mono">
         {deployment ? `Application: ${deployment.status} · Onchain: ${isContractDeployed("agent_registry") ? "REGISTERED" : "NOT ANCHORED"}` : "Application: OFFCHAIN AGENT · Onchain: NOT ANCHORED"}
       </div>
-    </Link>
+      </Link>
+    </MotionCard>
+    </MotionReveal>
   );
 }
 

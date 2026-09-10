@@ -357,37 +357,36 @@ export default function AgentDetailPage() {
         onExecuted={recordExecution}
       />
 
-      {wizardOpen && (
-        <DeploymentWizard
-          agent={agent}
-          dbAgent={
-            dbAgents.find((a) => a.id === agent.id) ?? {
-              id: agent.id,
-              name: agent.name,
-              slug: agent.id,
-              description: agent.description,
-              creator: agent.publisher,
-              creatorWallet: agent.publisherAddress,
-              version: agent.version,
-              category: agent.category.toUpperCase() as any,
-              capabilities: agent.actionSurface.map((c: any) => c.toUpperCase()),
-              supportedAssets: agent.assets,
-              riskLevel: "LOW" as any,
-              privacySupport: true,
-              verificationStatus: "PENDING" as any,
-              deploymentStatus: "LIVE" as any,
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-              metadataHash: agent.manifestHash,
-            }
+      <DeploymentWizard
+        open={wizardOpen}
+        agent={agent}
+        dbAgent={
+          dbAgents.find((a) => a.id === agent.id) ?? {
+            id: agent.id,
+            name: agent.name,
+            slug: agent.id,
+            description: agent.description,
+            creator: agent.publisher,
+            creatorWallet: agent.publisherAddress,
+            version: agent.version,
+            category: agent.category.toUpperCase() as any,
+            capabilities: agent.actionSurface.map((c: any) => c.toUpperCase()),
+            supportedAssets: agent.assets,
+            riskLevel: "LOW" as any,
+            privacySupport: true,
+            verificationStatus: "PENDING" as any,
+            deploymentStatus: "LIVE" as any,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            metadataHash: agent.manifestHash,
           }
-          onClose={() => setWizardOpen(false)}
-          onDeployed={() => {
-            refreshFromDb();
-            setWizardOpen(false);
-          }}
-        />
-      )}
+        }
+        onClose={() => setWizardOpen(false)}
+        onDeployed={() => {
+          refreshFromDb();
+          setWizardOpen(false);
+        }}
+      />
     </div>
   );
 }

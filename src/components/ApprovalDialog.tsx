@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import {
   AlertTriangle,
   ArrowRight,
@@ -26,6 +27,10 @@ import type {
   PolicyDocument,
 } from "../lib/types";
 import { Badge, Button } from "./ui/primitives";
+import MotionModal from "./motion/MotionModal";
+import MotionStatus, { type PipelineStatus } from "./motion/MotionStatus";
+import { traceContainer, traceRow } from "../lib/motion/variants";
+import { useReducedMotion } from "../lib/motion/useReducedMotion";
 
 const PHASES: { key: ExecutionPhase; label: string; icon: typeof Cpu }[] = [
   { key: "envelope_built", label: "Execution envelope built · nonce-bound", icon: FileCheck2 },
@@ -106,8 +111,12 @@ export default function ApprovalDialog({
 
   // Declared before the early return so hook order stays stable.
   useScrollLock(open);
+  const reduced = useReducedMotion();
 
-  if (!open || !intent || !verdict) return null;
+  // Only bail when there is genuinely nothing to have ever shown (no
+  // proposal made yet) — `open` itself is handled by MotionModal so its
+  // exit animation can play instead of the dialog vanishing instantly.
+  if (!intent || !verdict) return null;
 
   const run = async () => {
     setStage("executing");
@@ -142,12 +151,15 @@ export default function ApprovalDialog({
     verdict.outcome === "APPROVE" ? "good" : verdict.outcome === "REJECT" ? "bad" : "warn";
   const phaseIndex = phase ? PHASES.findIndex((p) => p.key === phase) : -1;
 
+  const pipelineStatus: PipelineStatus =
+    stage === "rejected" ? "BLOCKED"
+    : stage === "done" ? "COMPLETED"
+    : stage === "executing" ? "EXECUTING"
+    : verdict.outcome === "REQUIRE_USER_CONFIRMATION" ? "AWAITING_APPROVAL"
+    : "APPROVED";
+
   return (
-    <div className="fixed inset-0 z-[100] grid place-items-center p-4 overlay" onClick={onClose}>
-      <div
-        className="w-full max-w-[720px] max-h-[88dvh] overflow-y-auto overscroll-contain rounded-2xl modal-surface holo-edge"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <MotionModal open={open} onClose={onClose} zIndex={100} panelClassName="w-full max-w-[720px] max-h-[88dvh] overflow-y-auto overscroll-contain rounded-2xl modal-surface holo-edge">
         {/* header */}
         <div
           className="flex items-start justify-between gap-4 px-6 py-4 border-b sticky top-0 z-10 modal-surface rounded-t-2xl"
@@ -165,6 +177,7 @@ export default function ApprovalDialog({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <MotionStatus status={pipelineStatus} hideLabel size="sm" />
             <Badge tone={tone as "good" | "bad" | "warn"}>{verdict.outcome}</Badge>
             <button onClick={onClose} className="faint hover:text-[var(--text)]">
               <X size={16} />
@@ -195,7 +208,14 @@ export default function ApprovalDialog({
                 engine v{verdict.engineVersion} · {short(verdict.traceHash, 8, 4)}
               </span>
             </SectionLabel>
-            <div className="mt-2 rounded-lg overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+            <motion.div
+              key={intent.id}
+              className="mt-2 rounded-lg overflow-hidden"
+              style={{ border: "1px solid var(--border)" }}
+              variants={traceContainer}
+              initial={reduced ? "visible" : "hidden"}
+              animate="visible"
+            >
               {verdict.trace.map((r, i) => {
                 const c =
                   r.outcome === "pass" ? "var(--good)"
@@ -203,8 +223,9 @@ export default function ApprovalDialog({
                   : r.outcome === "confirm" ? "var(--warn)"
                   : "var(--text-faint)";
                 return (
-                  <div
+                  <motion.div
                     key={r.id + i}
+                    variants={reduced ? undefined : traceRow}
                     className="flex items-center gap-3 px-3 py-[7px] border-b last:border-0"
                     style={{ borderColor: "var(--border)", opacity: r.outcome === "skipped" ? 0.4 : 1 }}
                   >
@@ -216,10 +237,10 @@ export default function ApprovalDialog({
                     <span className="mono text-[10px] w-[54px] text-right" style={{ color: c }}>
                       {r.outcome}
                     </span>
-                  </div>
+                  </motion.div>
                 );
               })}
-            </div>
+            </motion.div>
             {verdict.reason && (
               <div
                 className="flex items-start gap-2.5 rounded-lg px-3 py-2.5 mt-3"
@@ -259,18 +280,31 @@ export default function ApprovalDialog({
               <div className="mt-2 space-y-2">
                 {PHASES.map((p, i) => {
                   const done = phaseIndex >= i;
+                  const active = stage === "executing" && i === phaseIndex + 1;
                   const Icon = p.icon;
                   return (
                     <div key={p.key} className="flex items-center gap-3">
-                      <span
-                        className="h-6 w-6 rounded-md grid place-items-center transition-all shrink-0"
+                      <motion.span
+                        className="relative h-6 w-6 rounded-md grid place-items-center shrink-0"
                         style={{
                           background: done ? "color-mix(in oklab, var(--accent-3) 16%, transparent)" : "transparent",
                           border: `1px solid ${done ? "color-mix(in oklab, var(--accent-3) 44%, transparent)" : "var(--border)"}`,
                         }}
+                        initial={false}
+                        animate={reduced ? {} : done ? { scale: [0.85, 1.12, 1] } : {}}
+                        transition={{ duration: 0.35, ease: "easeOut" }}
                       >
+                        {active && !reduced && (
+                          <motion.span
+                            aria-hidden
+                            className="absolute inset-0 rounded-md"
+                            style={{ border: "1px solid var(--accent-3)" }}
+                            animate={{ opacity: [0.3, 0.9, 0.3], scale: [1, 1.08, 1] }}
+                            transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+                          />
+                        )}
                         <Icon size={11} style={{ color: done ? "var(--accent-3)" : "var(--text-faint)" }} />
-                      </span>
+                      </motion.span>
                       <span className={`text-[12px] ${done ? "" : "faint"}`}>{p.label}</span>
                       {done && <Check size={12} style={{ color: "var(--good)", marginLeft: "auto" }} />}
                     </div>
@@ -312,8 +346,7 @@ export default function ApprovalDialog({
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </MotionModal>
   );
 }
 

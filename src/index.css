@@ -274,6 +274,50 @@ select option { background: var(--bg-2); color: var(--text); }
   50% { opacity: 0.32; }
 }
 
+/* Continuous ambient drift for MotionOrb's idle state — cheap, GPU-composited
+   (background-position only), and disabled below for reduced motion. Framer
+   Motion is layered on top of this for actual state transitions. */
+.holo-orb-ambient {
+  background-size: 160% 160%;
+  animation: holoOrbDrift 7s ease-in-out infinite;
+}
+@keyframes holoOrbDrift {
+  0%, 100% { background-position: 40% 35%; }
+  50% { background-position: 60% 65%; }
+}
+
+/* Shared loading shimmer — used by skeleton placeholders (agent cards,
+   dashboard metrics while data is not yet available). */
+.skeleton-shimmer {
+  background: linear-gradient(
+    100deg,
+    var(--track) 30%,
+    color-mix(in oklab, var(--text) 6%, var(--track)) 50%,
+    var(--track) 70%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.6s ease-in-out infinite;
+}
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Global reduced-motion policy: every CSS-driven continuous animation in the
+   app is disabled here in one place. Framer Motion primitives make the same
+   decision at the JS layer via useReducedMotion() — functionality never
+   depends on either, only movement does. */
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot,
+  .holo-orb-ambient,
+  .skeleton-shimmer {
+    animation: none !important;
+  }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ---------------- scrollbar ---------------- */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }

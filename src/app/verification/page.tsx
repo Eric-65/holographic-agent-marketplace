@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { motion } from "framer-motion";
 import { useStore } from "../../lib/store";
 import { short } from "../../lib/hash";
 import { datetime } from "../../lib/format";
@@ -6,6 +7,9 @@ import { isContractDeployed } from "../../lib/contracts/config";
 import { verifyExecution } from "../../lib/api/verification";
 import { Panel, PanelHeader, SectionTitle, Badge, Button } from "../../components/ui/primitives";
 import { CheckCircle2, XCircle, Clock, ShieldCheck, FileCheck2, ScrollText, Bot, UserCheck, Wallet, ExternalLink } from "lucide-react";
+import MotionStatus, { type PipelineStatus } from "../../components/motion/MotionStatus";
+import { traceContainer, traceRow } from "../../lib/motion/variants";
+import { useReducedMotion } from "../../lib/motion/useReducedMotion";
 
 export default function VerificationPage() {
   const { dbUser, dbReceipts, executionRequests, dbPolicies, deployments } = useStore();
@@ -58,6 +62,17 @@ export default function VerificationPage() {
       ? "VERIFIED"
       : "NOT_CHECKED";
 
+  // Never jumps straight to "verified" — CHECKING only clears once the real
+  // async verifyExecution() call has actually resolved.
+  const pipelineStatus: PipelineStatus = verifying
+    ? "CHECKING"
+    : finalStatus === "VERIFIED"
+      ? "COMPLETED"
+      : finalStatus === "NOT VERIFIED"
+        ? "FAILED"
+        : "IDLE";
+  const reduced = useReducedMotion();
+
   return (
     <div className="space-y-6">
       <SectionTitle
@@ -106,7 +121,8 @@ export default function VerificationPage() {
                   title={`Receipt ${short(selectedReceipt.id, 10, 6)}`}
                   sub={`${selectedReceipt.agentName} · ${selectedReceipt.isDemo ? "DEMO RECEIPT" : "STRK20 EXECUTION"}`}
                   right={
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2">
+                      <MotionStatus status={pipelineStatus} hideLabel size="sm" />
                       <Badge tone={finalStatus === "VERIFIED" ? "good" : finalStatus === "NOT VERIFIED" ? "bad" : "neutral"}>{finalStatus}</Badge>
                       <Button variant="primary" size="sm" onClick={() => void handleVerify()} disabled={verifying}>
                         {verifying ? "Checking…" : "Verify"}
@@ -132,12 +148,12 @@ export default function VerificationPage() {
 
                   <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--border)" }}>
                     <div className="text-[11px] faint uppercase tracking-wider mb-3">Visual chain</div>
-                    <div className="space-y-0">
+                    <motion.div key={selectedReceipt.id} className="space-y-0" variants={traceContainer} initial={reduced ? "visible" : "hidden"} animate="visible">
                       {chain.map((c, i) => {
                         const Icon = c.icon;
                         const isVerified = c.status === "VERIFIED";
                         return (
-                          <div key={c.label} className="flex gap-3">
+                          <motion.div key={c.label} variants={reduced ? undefined : traceRow} className="flex gap-3">
                             <div className="flex flex-col items-center">
                               <span className="h-7 w-7 rounded-lg grid place-items-center" style={{ background: isVerified ? "color-mix(in oklab, var(--good) 14%, transparent)" : "color-mix(in oklab, var(--text-faint) 12%, transparent)", border: `1px solid ${isVerified ? "color-mix(in oklab, var(--good) 30%, transparent)" : "var(--border)"}` }}>
                                 <Icon size={12} style={{ color: isVerified ? "var(--good)" : "var(--text-faint)" }} />
@@ -153,10 +169,10 @@ export default function VerificationPage() {
                               </div>
                               <div className="text-[11px] faint truncate">{c.detail}</div>
                             </div>
-                          </div>
+                          </motion.div>
                         );
                       })}
-                    </div>
+                    </motion.div>
 
                     <div className="mt-4 flex items-center gap-2">
                       <span className="text-[12px] font-medium">FINAL STATUS</span>
