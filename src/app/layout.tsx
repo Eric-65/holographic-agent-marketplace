@@ -8,6 +8,7 @@ import {
   Moon,
   ScrollText,
   Settings,
+  Sparkles,
   Sun,
   Vault,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/treasury", label: "Treasury", icon: Vault },
+  { href: "/assistant", label: "Assistant", icon: Sparkles },
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/policies", label: "Policies", icon: ScrollText },
   { href: "/compliance", label: "Compliance", icon: ScrollText },

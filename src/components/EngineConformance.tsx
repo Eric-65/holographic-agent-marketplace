@@ -25,6 +25,8 @@ export default function EngineConformance() {
         await import("../lib/db/persistence.test");
         await import("../lib/agents/security.test");
         await import("../lib/treasury/automation.test");
+        await import("../lib/ai/evaluation.test");
+        await import("../lib/ai/security.test");
       }
       const r = await runSuiteAsync();
       setReport(r);

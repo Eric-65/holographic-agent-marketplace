@@ -3,6 +3,7 @@ import AppShell from "./app/layout";
 import { StoreProvider } from "./lib/store";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import OverviewPage from "./app/page";
+import AssistantPage from "./app/assistant/page";
 import AgentsPage from "./app/agents/page";
 import AgentDetailPage from "./app/agents/[id]/page";
 import TreasuryPage from "./app/treasury/page";
@@ -26,6 +27,8 @@ import SettingsPage from "./app/settings/page";
 function Routes() {
   const { pattern } = useRoute();
   switch (pattern) {
+    case "/assistant":
+      return <AssistantPage />;
     case "/agents":
       return <AgentsPage />;
     case "/agents/[id]":

@@ -24,6 +24,7 @@ import {
 
 export const ROUTES = [
   "/",
+  "/assistant",
   "/agents",
   "/agents/[id]",
   "/treasury",

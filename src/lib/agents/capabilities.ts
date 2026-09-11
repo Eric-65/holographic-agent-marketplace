@@ -168,6 +168,9 @@ export function validateIntentCapability(intentAction: string, agentCapabilities
     payment: ["PRIVATE_TRANSFER", "PAYMENT_SCHEDULING"],
     PRIVATE_DISTRIBUTION: ["PRIVATE_DISTRIBUTION"],
     TREASURY_MANAGEMENT: ["TREASURY_MANAGEMENT"],
+    // AI structured-intent action names (src/lib/ai/schema.ts) — plural capability ids on purpose, matching the registry above.
+    SCHEDULE_PAYMENT: ["SCHEDULED_PAYMENTS", "PAYMENT_SCHEDULING"],
+    PAYMENT_REQUEST: ["PAYMENT_REQUESTS"],
   };
 
   const required = mapping[intentAction] ?? [];

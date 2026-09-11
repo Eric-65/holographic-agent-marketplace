@@ -344,7 +344,9 @@ export interface DbNotification {
     | "automation_resumed"
     | "new_recipient_review_required"
     | "schedule_updated"
-    | "emergency_stop_triggered";
+    | "emergency_stop_triggered"
+    | "ai_intent_blocked"
+    | "ai_unavailable";
   title: string;
   message: string;
   read: boolean;
@@ -620,7 +622,7 @@ export interface DbNewRecipientReview {
   recipient: string;
   asset: string;
   /** What was blocked waiting on this recipient — re-attempted after approval. */
-  sourceType: "schedule_occurrence" | "batch_item" | "workflow_run" | "payment_request";
+  sourceType: "schedule_occurrence" | "batch_item" | "workflow_run" | "payment_request" | "ai_intent";
   sourceId: string;
   status: NewRecipientReviewStatus;
   createdAt: number;
@@ -660,7 +662,85 @@ export type DbTableName =
   | "agent_messages"
   | "automation_controls"
   | "emergency_events"
-  | "new_recipient_reviews";
+  | "new_recipient_reviews"
+  | "ai_intents"
+  | "ai_conversation_turns"
+  | "ai_trace_events";
+
+/* ------------------------------------------------------------ AI agents
+ * The AI layer is an intelligence layer, never an authority layer. Every
+ * row here records something the model PROPOSED or SAID — never something
+ * it decided. Decisions (policy, budget, execution) remain the sole output
+ * of the existing deterministic engines; nothing in this section stores a
+ * private key, viewing key, seed phrase, or provider credential.
+ * -------------------------------------------------------------------------- */
+
+export type AIIntentAction =
+  | "PRIVATE_TRANSFER"
+  | "SCHEDULE_PAYMENT"
+  | "PAYMENT_REQUEST"
+  | "BUDGET_CHECK"
+  | "APPROVAL_REQUEST"
+  | "EXECUTION_STATUS"
+  | "VERIFICATION_STATUS"
+  | "CLARIFICATION_NEEDED"
+  | "UNSUPPORTED";
+
+export type AIIntentStatus =
+  | "DRAFT"
+  | "VALIDATED"
+  | "INVALID"
+  | "AWAITING_CONFIRMATION"
+  | "EXECUTING"
+  | "EXECUTED"
+  | "BLOCKED"
+  | "CANCELLED";
+
+export interface DbAIIntent {
+  id: string;
+  userId: string;
+  agentId: string;
+  agentVersion: string;
+  /** The provider + model that produced this, and the prompt/tool-schema version — never silently changed in place. */
+  provider: "mock" | "openai";
+  model: string;
+  promptVersion: string;
+  /** The user's raw message, truncated — see docs/ai-agents for retention policy. Never stores wallet secrets by construction (nothing upstream ever asks for them). */
+  rawMessage: string;
+  /** The unvalidated candidate the model returned. */
+  rawOutput: Record<string, unknown>;
+  /** Set once schema + capability + domain validation has run. */
+  structuredIntent: Record<string, unknown> | null;
+  status: AIIntentStatus;
+  invalidReason?: string;
+  executionRequestId?: string;
+  scheduleId?: string;
+  intentHash: Hex;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DbAIConversationTurn {
+  id: string;
+  userId: string;
+  sessionId: string;
+  role: "user" | "assistant";
+  content: string;
+  relatedIntentId?: string;
+  createdAt: number;
+}
+
+export type AITraceStage = "request" | "structured_output" | "schema_validation" | "capability_validation" | "policy_decision" | "tool_call";
+
+export interface DbAITraceEvent {
+  id: string;
+  userId: string;
+  intentId: string;
+  stage: AITraceStage;
+  detail: string;
+  ok: boolean;
+  createdAt: number;
+}
 
 export interface DbSchema {
   users: DbUser[];
@@ -696,4 +776,7 @@ export interface DbSchema {
   automation_controls: DbAutomationControl[];
   emergency_events: DbEmergencyEvent[];
   new_recipient_reviews: DbNewRecipientReview[];
+  ai_intents: DbAIIntent[];
+  ai_conversation_turns: DbAIConversationTurn[];
+  ai_trace_events: DbAITraceEvent[];
 }
